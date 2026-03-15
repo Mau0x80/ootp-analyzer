@@ -2,7 +2,7 @@
 
 A web-based roster analysis tool for **Out of the Park Baseball 27**. Import your team's CSV exports and get instant player scoring, lineup optimization, and visual analytics.
 
-🔗 **Live demo:** [mauox80.github.io/ootp-analyzer](https://mauox80.github.io/ootp-analyzer/)
+🔗 **Live demo:** [mau0x80.github.io/ootp-analyzer](https://mau0x80.github.io/ootp-analyzer/)
 
 ---
 
