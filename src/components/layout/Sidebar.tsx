@@ -2,7 +2,7 @@ import { useStore } from '../../store/useStore';
 import type { AppTab } from '../../types';
 import {
   LayoutDashboard, Users, Swords, Shield, ListOrdered,
-  RotateCcw, Upload, Settings, Activity, TrendingUp,
+  RotateCcw, Upload, Settings, Activity, TrendingUp, Sliders,
 } from 'lucide-react';
 
 const NAV_ITEMS: { tab: AppTab; label: string; icon: React.FC<any> }[] = [
@@ -13,6 +13,7 @@ const NAV_ITEMS: { tab: AppTab; label: string; icon: React.FC<any> }[] = [
   { tab: 'lineups', label: 'Lineups', icon: ListOrdered },
   { tab: 'rotation', label: 'Rotation', icon: RotateCcw },
   { tab: 'trends', label: 'Trends', icon: TrendingUp },
+  { tab: 'strategy', label: 'Strategy', icon: Sliders },
   { tab: 'import', label: 'Import Data', icon: Upload },
   { tab: 'settings', label: 'Settings', icon: Settings },
 ];

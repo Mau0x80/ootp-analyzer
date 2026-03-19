@@ -7,6 +7,7 @@ import Defense from './pages/Defense';
 import Lineups from './pages/Lineups';
 import Rotation from './pages/Rotation';
 import Trends from './pages/Trends';
+import Strategy from './pages/Strategy';
 import ImportData from './pages/ImportData';
 import Settings from './pages/Settings';
 import PlayerModal from './components/players/PlayerModal';
@@ -19,6 +20,7 @@ const PAGES: Record<string, React.FC> = {
   lineups: Lineups,
   rotation: Rotation,
   trends: Trends,
+  strategy: Strategy,
   import: ImportData,
   settings: Settings,
 };

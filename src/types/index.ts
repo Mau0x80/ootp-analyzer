@@ -414,6 +414,7 @@ export type AppTab =
   | 'lineups'
   | 'rotation'
   | 'trends'
+  | 'strategy'
   | 'import'
   | 'settings';
 
