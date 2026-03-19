@@ -1,4 +1,5 @@
 import type { Player, PlayerBase, BattingRatings, PitchingRatings, FieldingRatings, PositionRatings, BattingStats, PitchingStats, PlayerScores } from '../types';
+import { getCardTier } from '../types';
 
 // ============================================================
 // Player Merger
@@ -121,6 +122,8 @@ function buildPlayer(raw: RawPlayerData): Player {
     overallValue: 0,
   };
 
+  const cardOvr = Math.max(raw.battingRatings?.ovr ?? 0, raw.pitchingRatings?.ovr ?? 0);
+
   return {
     ...base,
     id,
@@ -138,5 +141,14 @@ function buildPlayer(raw: RawPlayerData): Player {
     hitterArchetype: null,
     pitcherArchetype: null,
     percentiles: {},
+    // PT fields (populated by ptScoringEngine when in PT mode)
+    cardOvr,
+    cardTier: getCardTier(cardOvr),
+    artifactBoosts: [],
+    effectiveBattingRatings: null,
+    effectivePitchingRatings: null,
+    effectiveFieldingRatings: null,
+    effectiveScores: emptyScores,
+    hiddenPotentialGap: 0,
   };
 }

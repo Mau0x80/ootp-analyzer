@@ -1,6 +1,9 @@
 import { create } from 'zustand';
-import type { Player, AppTab, AppSettings, CsvFileInfo, CsvFileType, Lineup, PitchingStaff, SeasonSnapshot } from '../types';
-import { DEFAULT_SETTINGS } from '../types';
+import type {
+  Player, AppTab, AppSettings, CsvFileInfo, CsvFileType, Lineup, PitchingStaff,
+  SeasonSnapshot, AppMode, PTAppTab, ArtifactBoost, ArtifactConfig, TournamentConfig,
+} from '../types';
+import { DEFAULT_SETTINGS, RATINGS_SCALES } from '../types';
 import {
   parseCsvText, detectCsvType, extractPlayerBase,
   parseBattingRatings, parsePitchingRatings, parseFieldingRatings,
@@ -10,6 +13,9 @@ import { mergePlayers } from '../utils/playerMerger';
 import { scoreAllPlayers } from '../utils/scoringEngine';
 import { calcPercentiles } from '../utils/percentileEngine';
 import { generateLineup, generatePitchingStaff } from '../utils/lineupOptimizer';
+import { ptScoreAllPlayers, applyArtifacts } from '../utils/ptScoringEngine';
+import { PT27_META_PROFILE } from '../utils/scoringProfiles';
+import { generateTournamentLineup } from '../utils/tournamentOptimizer';
 
 interface RawDatasets {
   batting_ratings: { base: any; data: any }[];
@@ -50,6 +56,29 @@ interface AppState {
   saveCurrentAsSeason: (label: string) => void;
   deleteSeason: (index: number) => void;
   clearSeasons: () => void;
+  // Perfect Team mode
+  appMode: AppMode;
+  setAppMode: (mode: AppMode) => void;
+  ptActiveTab: PTAppTab;
+  setPTActiveTab: (tab: PTAppTab) => void;
+  ptPlayers: Player[];
+  ptCsvFiles: CsvFileInfo[];
+  ptRawDatasets: RawDatasets;
+  ptLoadCsvFile: (fileName: string, text: string) => { success: boolean; type: CsvFileType | null; error?: string };
+  ptRebuildPlayers: () => void;
+  ptResetData: () => void;
+  // Artifacts
+  artifactConfigs: ArtifactConfig[];
+  playerArtifacts: Record<string, ArtifactBoost[]>;
+  addArtifactConfig: (config: ArtifactConfig) => void;
+  removeArtifactConfig: (id: string) => void;
+  applyArtifactToPlayer: (playerId: string, boosts: ArtifactBoost[]) => void;
+  clearPlayerArtifacts: (playerId: string) => void;
+  // Tournament
+  tournamentConfig: TournamentConfig;
+  tournamentLineup: Lineup | null;
+  updateTournamentConfig: (partial: Partial<TournamentConfig>) => void;
+  generateTournamentLineup: () => void;
 }
 
 const EMPTY_DATASETS: RawDatasets = {
@@ -195,6 +224,137 @@ export const useStore = create<AppState>((set, get) => ({
     });
   },
 
+  // ============================================================
+  // Perfect Team Mode
+  // ============================================================
+  appMode: 'franchise',
+  setAppMode: (mode) => set({ appMode: mode }),
+
+  ptActiveTab: 'pt_import',
+  setPTActiveTab: (tab) => set({ ptActiveTab: tab }),
+
+  ptPlayers: [],
+  ptCsvFiles: [],
+  ptRawDatasets: { ...EMPTY_DATASETS },
+
+  ptLoadCsvFile: (fileName, text) => {
+    const { headers, rows } = parseCsvText(text);
+    const type = detectCsvType(headers);
+    if (!type) {
+      return { success: false, type: null, error: `Could not detect CSV type for "${fileName}".` };
+    }
+    const state = get();
+    const newDatasets = { ...state.ptRawDatasets };
+    const parser = PARSERS[type];
+    const parsed = rows
+      .filter((row) => (row['Name'] || '').trim().length > 0)
+      .map((row) => ({ base: extractPlayerBase(row), data: parser(row) }));
+    newDatasets[type] = parsed;
+    const newFiles = state.ptCsvFiles.filter((f) => f.type !== type);
+    newFiles.push({ type, fileName, rowCount: parsed.length, loaded: true });
+    set({ ptRawDatasets: newDatasets, ptCsvFiles: newFiles });
+    get().ptRebuildPlayers();
+    return { success: true, type };
+  },
+
+  ptRebuildPlayers: () => {
+    const state = get();
+    const ds = state.ptRawDatasets;
+    const datasets: any = {};
+    if (ds.batting_ratings.length > 0) datasets.battingRatings = ds.batting_ratings;
+    if (ds.pitching_ratings.length > 0) datasets.pitchingRatings = ds.pitching_ratings;
+    if (ds.fielding_ratings.length > 0) datasets.fieldingRatings = ds.fielding_ratings;
+    if (ds.position_ratings.length > 0) datasets.positionRatings = ds.position_ratings;
+    if (ds.batting_stats.length > 0) datasets.battingStats = ds.batting_stats;
+    if (ds.pitching_stats.length > 0) datasets.pitchingStats = ds.pitching_stats;
+    if (ds.batting_super_stats.length > 0) datasets.battingSuperStats = ds.batting_super_stats;
+    if (ds.pitching_super_stats.length > 0) datasets.pitchingSuperStats = ds.pitching_super_stats;
+
+    const merged = mergePlayers(datasets);
+    const scored = ptScoreAllPlayers(merged, state.settings.currentRatingsScale);
+    const withPercentiles = calcPercentiles(scored);
+
+    // Re-apply existing artifact boosts
+    const { playerArtifacts, settings } = state;
+    const scale = RATINGS_SCALES[settings.currentRatingsScale as keyof typeof RATINGS_SCALES] || RATINGS_SCALES['20_80'];
+    const withArtifacts = withPercentiles.map((p) => {
+      const boosts = playerArtifacts[p.id];
+      if (boosts && boosts.length > 0) {
+        return applyArtifacts(p, boosts, scale, PT27_META_PROFILE);
+      }
+      return p;
+    });
+
+    set({ ptPlayers: withArtifacts });
+  },
+
+  ptResetData: () => {
+    set({
+      ptPlayers: [],
+      ptCsvFiles: [],
+      ptRawDatasets: { ...EMPTY_DATASETS },
+      playerArtifacts: {},
+      tournamentLineup: null,
+    });
+  },
+
+  // Artifacts
+  artifactConfigs: [],
+  playerArtifacts: {},
+
+  addArtifactConfig: (config) =>
+    set((s) => ({ artifactConfigs: [...s.artifactConfigs, config] })),
+
+  removeArtifactConfig: (id) =>
+    set((s) => ({ artifactConfigs: s.artifactConfigs.filter((c) => c.id !== id) })),
+
+  applyArtifactToPlayer: (playerId, boosts) => {
+    const state = get();
+    const newArtifacts = { ...state.playerArtifacts, [playerId]: boosts };
+    set({ playerArtifacts: newArtifacts });
+
+    const scale = RATINGS_SCALES[state.settings.currentRatingsScale as keyof typeof RATINGS_SCALES] || RATINGS_SCALES['20_80'];
+    const updatedPlayers = state.ptPlayers.map((p) => {
+      if (p.id === playerId) {
+        return applyArtifacts(p, boosts, scale, PT27_META_PROFILE);
+      }
+      return p;
+    });
+    set({ ptPlayers: updatedPlayers });
+  },
+
+  clearPlayerArtifacts: (playerId) => {
+    const state = get();
+    const newArtifacts = { ...state.playerArtifacts };
+    delete newArtifacts[playerId];
+    set({ playerArtifacts: newArtifacts });
+
+    const scale = RATINGS_SCALES[state.settings.currentRatingsScale as keyof typeof RATINGS_SCALES] || RATINGS_SCALES['20_80'];
+    const updatedPlayers = state.ptPlayers.map((p) => {
+      if (p.id === playerId) {
+        return applyArtifacts(p, [], scale, PT27_META_PROFILE);
+      }
+      return p;
+    });
+    set({ ptPlayers: updatedPlayers });
+  },
+
+  // Tournament
+  tournamentConfig: { ovrCap: 79, tierFilter: ['Silver'], prioritizeArtifacts: true },
+  tournamentLineup: null,
+
+  updateTournamentConfig: (partial) =>
+    set((s) => ({ tournamentConfig: { ...s.tournamentConfig, ...partial } })),
+
+  generateTournamentLineup: () => {
+    const state = get();
+    const lineup = generateTournamentLineup(state.ptPlayers, state.tournamentConfig, state.settings);
+    set({ tournamentLineup: lineup });
+  },
+
+  // ============================================================
+  // Season Snapshots (Franchise)
+  // ============================================================
   seasons: [],
   saveCurrentAsSeason: (label) => {
     const state = get();

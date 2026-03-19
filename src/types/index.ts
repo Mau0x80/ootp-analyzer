@@ -285,6 +285,15 @@ export interface Player extends PlayerBase {
   hitterArchetype: HitterArchetype | null;
   pitcherArchetype: PitcherArchetype | null;
   percentiles: PlayerPercentiles;
+  // Perfect Team fields (populated only in PT mode)
+  cardOvr: number;
+  cardTier: CardTier;
+  artifactBoosts: ArtifactBoost[];
+  effectiveBattingRatings: BattingRatings | null;
+  effectivePitchingRatings: PitchingRatings | null;
+  effectiveFieldingRatings: FieldingRatings | null;
+  effectiveScores: PlayerScores;
+  hiddenPotentialGap: number;
 }
 
 // ============================================================
@@ -442,3 +451,78 @@ export const DEFAULT_SETTINGS: AppSettings = {
   currentRatingsScale: '20_80',
   potentialRatingsScale: '20_80',
 };
+
+// ============================================================
+// Perfect Team Mode Types
+// ============================================================
+
+export type AppMode = 'franchise' | 'perfectTeam';
+
+export type PTAppTab =
+  | 'pt_dashboard'
+  | 'pt_collection'
+  | 'pt_tournament'
+  | 'pt_sleepers'
+  | 'pt_import'
+  | 'pt_settings';
+
+export type CardTier = 'Bronze' | 'Silver' | 'Gold' | 'Diamond' | 'Perfect';
+
+export const CARD_TIER_BOUNDARIES: { tier: CardTier; min: number; max: number }[] = [
+  { tier: 'Bronze',  min: 0,   max: 69 },
+  { tier: 'Silver',  min: 70,  max: 79 },
+  { tier: 'Gold',    min: 80,  max: 89 },
+  { tier: 'Diamond', min: 90,  max: 99 },
+  { tier: 'Perfect', min: 100, max: 200 },
+];
+
+export const CARD_TIER_COLORS: Record<CardTier, { text: string; bg: string; border: string }> = {
+  Bronze:  { text: 'text-amber-600',   bg: 'bg-amber-600/10',   border: 'border-amber-600/30' },
+  Silver:  { text: 'text-gray-300',    bg: 'bg-gray-300/10',    border: 'border-gray-300/30' },
+  Gold:    { text: 'text-yellow-400',  bg: 'bg-yellow-400/10',  border: 'border-yellow-400/30' },
+  Diamond: { text: 'text-cyan-400',    bg: 'bg-cyan-400/10',    border: 'border-cyan-400/30' },
+  Perfect: { text: 'text-purple-400',  bg: 'bg-purple-400/10',  border: 'border-purple-400/30' },
+};
+
+export function getCardTier(ovr: number): CardTier {
+  if (ovr >= 100) return 'Perfect';
+  if (ovr >= 90) return 'Diamond';
+  if (ovr >= 80) return 'Gold';
+  if (ovr >= 70) return 'Silver';
+  return 'Bronze';
+}
+
+// Artifact system
+export interface ArtifactBoost {
+  attribute: string; // e.g., 'con', 'pow', 'eye', 'stu', 'mov', 'ifRng', etc.
+  boost: number;     // raw points added (in the user's current ratings scale)
+}
+
+export interface ArtifactConfig {
+  id: string;
+  name: string;
+  boosts: ArtifactBoost[];
+}
+
+// Scoring profile for PT meta weighting
+export interface ScoringProfile {
+  id: string;
+  label: string;
+  description: string;
+  offensiveWeights: { con: number; pow: number; eye: number; gap: number; spe: number; ste: number; babip: number };
+  defensiveWeights: {
+    catcher: { cAbi: number; cArm: number };
+    infield: { ifRng: number; ifErr: number; ifArm: number; tdp: number };
+    outfield: { ofRng: number; ofErr: number; ofArm: number };
+  };
+  pitchingWeights: { stu: number; mov: number; con: number; hra: number; pbabip: number; hld: number };
+  relieverWeights: { stu: number; mov: number; con: number; hld: number; hra: number; pbabip: number };
+  positionDefenseImportance: Record<string, number>;
+}
+
+// Tournament configuration
+export interface TournamentConfig {
+  ovrCap: number;
+  tierFilter: CardTier[];
+  prioritizeArtifacts: boolean;
+}
