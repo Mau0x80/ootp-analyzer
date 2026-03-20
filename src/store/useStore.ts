@@ -25,7 +25,7 @@ import {
   parseDumpAtBatStats,
 } from '../utils/dumpParser';
 import type { ParsedDumpData } from '../utils/dumpParser';
-import { mergeDumpData } from '../utils/dumpMerger';
+import { mergeDumpData, mergeFreeAgents, mergeDraftPlayers } from '../utils/dumpMerger';
 
 interface RawDatasets {
   batting_ratings: { base: any; data: any }[];
@@ -76,6 +76,8 @@ interface AppState {
   dumpFilterTeamId: number | undefined;
   setDumpFilterTeamId: (teamId: number | undefined) => void;
   dumpTeams: { id: number; name: string; abbr: string }[];
+  freeAgents: Player[];
+  draftPlayers: Player[];
   // Perfect Team mode
   appMode: AppMode;
   setAppMode: (mode: AppMode) => void;
@@ -261,6 +263,8 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
   dumpTeams: [],
+  freeAgents: [],
+  draftPlayers: [],
 
   // Phase 1: Quick scan — read only teams.csv + team_roster.csv to build team list
   scanDumpFolder: async (files: FileList) => {
@@ -285,6 +289,8 @@ export const useStore = create<AppState>((set, get) => ({
       players: [],
       dumpFilterTeamId: undefined,
       dumpTeams: [],
+  freeAgents: [],
+  draftPlayers: [],
     });
 
     // Store file handles for Phase 2
@@ -436,8 +442,25 @@ export const useStore = create<AppState>((set, get) => ({
     await yieldToUI();
     const withPercentiles = calcPercentiles(scored);
 
+    // Build free agents and draft players (top prospects only to keep it fast)
+    set({ dumpProgress: { total: 1, loaded: 0, currentFile: 'Loading free agents & draft pool...' } });
+    await yieldToUI();
+    const fa = mergeFreeAgents(parsedData);
+    const faScored = scoreAllPlayers(fa, get().settings);
+
+    const draft = mergeDraftPlayers(parsedData);
+    const draftScored = scoreAllPlayers(draft, get().settings);
+
     set({
       players: withPercentiles,
+      freeAgents: faScored.sort((a, b) => b.cardOvr - a.cardOvr).slice(0, 300),
+      draftPlayers: draftScored.sort((a, b) => {
+        // Sort by potential desc, then OA desc
+        const potA = a.dumpData?.potential ?? 0;
+        const potB = b.dumpData?.potential ?? 0;
+        if (potB !== potA) return potB - potA;
+        return b.cardOvr - a.cardOvr;
+      }).slice(0, 200),
       dumpProgress: null,
     });
 

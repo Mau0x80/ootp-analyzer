@@ -426,6 +426,8 @@ export type AppTab =
   | 'rotation'
   | 'trends'
   | 'strategy'
+  | 'organization'
+  | 'prospects'
   | 'import'
   | 'settings';
 

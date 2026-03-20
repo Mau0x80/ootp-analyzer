@@ -10,6 +10,8 @@ import Lineups from './pages/Lineups';
 import Rotation from './pages/Rotation';
 import Trends from './pages/Trends';
 import Strategy from './pages/Strategy';
+import Organization from './pages/Organization';
+import Prospects from './pages/Prospects';
 import ImportData from './pages/ImportData';
 import Settings from './pages/Settings';
 import PTDashboard from './pages/pt/PTDashboard';
@@ -29,6 +31,8 @@ const FRANCHISE_PAGES: Record<string, React.FC> = {
   rotation: Rotation,
   trends: Trends,
   strategy: Strategy,
+  organization: Organization,
+  prospects: Prospects,
   import: ImportData,
   settings: Settings,
 };

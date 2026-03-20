@@ -181,23 +181,23 @@ function aggregatePitchingRows(rows: DumpCareerPitchingRow[]): PitchingStats | n
 }
 
 // ============================================================
-// Main merge function
+// Shared context for merging
 // ============================================================
 
-export function mergeDumpData(data: ParsedDumpData, filterTeamId?: number): Player[] {
-  const players: Player[] = [];
+interface MergeContext {
+  data: ParsedDumpData;
+  playerTeamMap: Map<number, number>;
+  careerBatByPlayer: Map<number, DumpCareerBattingRow[]>;
+  careerPitchByPlayer: Map<number, DumpCareerPitchingRow[]>;
+  careerFieldByPlayer: Map<number, DumpCareerFieldingRow[]>;
+}
 
-  // Build team lookup
-  const teamMap = data.teams;
-  const parkMap = data.parks;
-
-  // Build player_id -> team_id from team_roster
+function buildMergeContext(data: ParsedDumpData): MergeContext {
   const playerTeamMap = new Map<number, number>();
   for (const entry of data.teamRoster) {
     playerTeamMap.set(entry.playerId, entry.teamId);
   }
 
-  // Group career stats by player_id
   const careerBatByPlayer = new Map<number, DumpCareerBattingRow[]>();
   for (const row of data.careerBatting) {
     if (!careerBatByPlayer.has(row.playerId)) careerBatByPlayer.set(row.playerId, []);
@@ -216,150 +216,207 @@ export function mergeDumpData(data: ParsedDumpData, filterTeamId?: number): Play
     careerFieldByPlayer.get(row.playerId)!.push(row);
   }
 
+  return { data, playerTeamMap, careerBatByPlayer, careerPitchByPlayer, careerFieldByPlayer };
+}
+
+function buildPlayer(pid: number, bio: DumpPlayerBio, teamId: number, ctx: MergeContext): Player {
+  const { data } = ctx;
+  const batRatings = data.battingRatings.get(pid);
+  const pitRatings = data.pitchingRatings.get(pid);
+  const fldRatings = data.fieldingRatings.get(pid);
+  const pValue = data.playerValues.get(pid);
+
+  const battingRatings = batRatings?.current ?? null;
+  const pitchingRatings = pitRatings?.current ?? null;
+  const fieldingRatings = fldRatings?.fieldingRatings ?? null;
+  const positionRatings = fldRatings?.positionRatings ?? null;
+
+  const battingStats = aggregateBattingRows(ctx.careerBatByPlayer.get(pid) || []);
+  const pitchingStats = aggregatePitchingRows(ctx.careerPitchByPlayer.get(pid) || []);
+
+  // Zone Rating
+  const fldRows = ctx.careerFieldByPlayer.get(pid) || [];
+  let zoneRating = 0;
+  if (fldRows.length > 0) {
+    const maxYear = Math.max(...fldRows.map((r) => r.year));
+    const latestRows = fldRows.filter((r) => r.year === maxYear && r.splitId === 0);
+    const best = latestRows.sort((a, b) => b.g - a.g)[0];
+    if (best) zoneRating = best.zr;
+  }
+
+  // Eligible positions
+  const eligiblePositions: string[] = [];
+  if (positionRatings) {
+    const pr = positionRatings;
+    const posMap: [string, number][] = [
+      ['P', pr.p], ['C', pr.c], ['1B', pr['1b']], ['2B', pr['2b']],
+      ['3B', pr['3b']], ['SS', pr.ss], ['LF', pr.lf], ['CF', pr.cf], ['RF', pr.rf],
+    ];
+    posMap.forEach(([p, val]) => { if (val > 0) eligiblePositions.push(p); });
+  }
+  if (eligiblePositions.length === 0) eligiblePositions.push(bio.pos);
+
+  const isPitcher = PITCHER_POS.has(bio.pos);
+  const isPositionPlayer = !isPitcher || eligiblePositions.some((p) => !PITCHER_POS.has(p) && p !== 'P');
+  const isTwoWay = isPitcher && isPositionPlayer && eligiblePositions.length > 1;
+
+  const name = `${bio.firstName} ${bio.lastName}`.trim();
+
+  // Resolve team + park
+  const team = data.teams.get(teamId);
+  const teamName = team ? `${team.name} ${team.nickname}`.trim() : '';
+  const teamAbbr = team?.abbr || '';
+  let parkFactors: ParkFactors | null = null;
+  if (team && data.parks.has(team.parkId)) {
+    parkFactors = data.parks.get(team.parkId)!;
+  }
+
+  const cardOvr = pValue?.oa ?? Math.max(battingRatings?.ovr ?? 0, pitchingRatings?.ovr ?? 0);
+
+  const dumpData: DumpExtraData = {
+    playerId: pid,
+    teamId,
+    teamName,
+    teamAbbr,
+    personality: bio.personality,
+    morale: bio.morale,
+    playerStrategy: bio.playerStrategy,
+    rosterInfo: data.rosterStatus.get(pid) || null,
+    contractInfo: data.contracts.get(pid) || null,
+    statcastData: data.atBatStats.get(pid) || null,
+    zoneRating,
+    catcherFraming: fldRatings?.catcherFraming ?? 0,
+    talentBattingRatings: batRatings?.talent ?? null,
+    talentPitchingRatings: pitRatings?.talent ?? null,
+    positionPotentials: fldRatings?.positionPotentials ?? {},
+    ovrByPosition: pValue?.ovrByPosition ?? {},
+    overallAbility: pValue?.oa ?? 0,
+    potential: pValue?.pot ?? 0,
+    parkFactors,
+    pitchRepertoire: pitRatings?.repertoire ?? null,
+    velocity: pitRatings?.velocity ?? 0,
+    armSlot: pitRatings?.armSlot ?? 0,
+  };
+
+  return {
+    name,
+    number: bio.uniformNumber,
+    pos: bio.pos,
+    age: bio.age,
+    bats: bio.bats,
+    throws: bio.throws,
+    inf: '',
+    status: dumpData.rosterInfo?.isActive ? 'Active Roster' : 'Reserve',
+    id: `dump-${pid}`,
+    battingRatings,
+    pitchingRatings,
+    fieldingRatings,
+    positionRatings,
+    battingStats,
+    pitchingStats,
+    isPitcher,
+    isPositionPlayer: !isPitcher || isTwoWay,
+    isTwoWay,
+    eligiblePositions,
+    scores: { ...emptyScores },
+    hitterArchetype: null,
+    pitcherArchetype: null,
+    percentiles: {},
+    cardOvr,
+    cardTier: getCardTier(cardOvr),
+    artifactBoosts: [],
+    effectiveBattingRatings: null,
+    effectivePitchingRatings: null,
+    effectiveFieldingRatings: null,
+    effectiveScores: { ...emptyScores },
+    hiddenPotentialGap: 0,
+    dumpData,
+  };
+}
+
+// ============================================================
+// Main merge function — organization players (team + affiliates)
+// ============================================================
+
+export function mergeDumpData(data: ParsedDumpData, filterTeamId?: number): Player[] {
+  const ctx = buildMergeContext(data);
+  const players: Player[] = [];
+
   // Build set of team IDs to include
-  // If filterTeamId is set, include that team + all its affiliates (minor league teams)
   const allowedTeamIds = new Set<number>();
   if (filterTeamId !== undefined && filterTeamId > 0) {
     allowedTeamIds.add(filterTeamId);
-    // Add all affiliates: teams whose parentTeamId matches filterTeamId
     for (const [tid, team] of data.teams) {
       if (team.parentTeamId === filterTeamId) {
         allowedTeamIds.add(tid);
       }
     }
   } else {
-    // No filter: only MLB-level teams
     for (const [tid, team] of data.teams) {
       if (team.level === 1) allowedTeamIds.add(tid);
     }
   }
 
   for (const [pid, bio] of data.players) {
-    const teamId = playerTeamMap.get(pid) ?? bio.teamId;
-
-    // Skip players not on an allowed team
+    const teamId = ctx.playerTeamMap.get(pid) ?? bio.teamId;
     if (teamId === 0 || !allowedTeamIds.has(teamId)) continue;
+    players.push(buildPlayer(pid, bio, teamId, ctx));
+  }
 
-    const batRatings = data.battingRatings.get(pid);
-    const pitRatings = data.pitchingRatings.get(pid);
-    const fldRatings = data.fieldingRatings.get(pid);
+  return players;
+}
+
+// ============================================================
+// Free agents — players with team_id = 0 and some professional experience
+// ============================================================
+
+export function mergeFreeAgents(data: ParsedDumpData): Player[] {
+  const ctx = buildMergeContext(data);
+  const players: Player[] = [];
+
+  for (const [pid, bio] of data.players) {
+    const teamId = ctx.playerTeamMap.get(pid) ?? bio.teamId;
+    if (teamId !== 0) continue;
+
+    // Free agents: have professional service time or career stats
+    const roster = data.rosterStatus.get(pid);
+    const hasPro = roster && (roster.proServiceYears > 0 || roster.mlbServiceYears > 0);
+    const hasCareerStats = ctx.careerBatByPlayer.has(pid) || ctx.careerPitchByPlayer.has(pid);
+    if (!hasPro && !hasCareerStats) continue;
+
+    const p = buildPlayer(pid, bio, 0, ctx);
+    p.status = 'Free Agent';
+    players.push(p);
+  }
+
+  return players;
+}
+
+// ============================================================
+// Draft-eligible — young players with team_id = 0 and no pro experience
+// ============================================================
+
+export function mergeDraftPlayers(data: ParsedDumpData): Player[] {
+  const ctx = buildMergeContext(data);
+  const players: Player[] = [];
+
+  for (const [pid, bio] of data.players) {
+    const teamId = ctx.playerTeamMap.get(pid) ?? bio.teamId;
+    if (teamId !== 0) continue;
+
+    // Draft-eligible: no pro service time and no career stats
+    const roster = data.rosterStatus.get(pid);
+    const hasPro = roster && (roster.proServiceYears > 0 || roster.mlbServiceYears > 0);
+    const hasCareerStats = ctx.careerBatByPlayer.has(pid) || ctx.careerPitchByPlayer.has(pid);
+    if (hasPro || hasCareerStats) continue;
+
+    // Must have ratings to be relevant
     const pValue = data.playerValues.get(pid);
+    if (!pValue) continue;
 
-    // Build batting/pitching ratings for the existing Player model
-    const battingRatings = batRatings?.current ?? null;
-    const pitchingRatings = pitRatings?.current ?? null;
-    const fieldingRatings = fldRatings?.fieldingRatings ?? null;
-    const positionRatings = fldRatings?.positionRatings ?? null;
-
-    // Career stats
-    const battingStats = aggregateBattingRows(careerBatByPlayer.get(pid) || []);
-    const pitchingStats = aggregatePitchingRows(careerPitchByPlayer.get(pid) || []);
-
-    // Zone Rating from fielding stats (latest year, overall split)
-    const fldRows = careerFieldByPlayer.get(pid) || [];
-    let zoneRating = 0;
-    if (fldRows.length > 0) {
-      const maxYear = Math.max(...fldRows.map((r) => r.year));
-      const latestRows = fldRows.filter((r) => r.year === maxYear && r.splitId === 0);
-      // Take the ZR of the position with the most games
-      const best = latestRows.sort((a, b) => b.g - a.g)[0];
-      if (best) zoneRating = best.zr;
-    }
-
-    // Build eligible positions
-    const eligiblePositions: string[] = [];
-    if (positionRatings) {
-      const pr = positionRatings;
-      const posMap: [string, number][] = [
-        ['P', pr.p], ['C', pr.c], ['1B', pr['1b']], ['2B', pr['2b']],
-        ['3B', pr['3b']], ['SS', pr.ss], ['LF', pr.lf], ['CF', pr.cf], ['RF', pr.rf],
-      ];
-      posMap.forEach(([p, val]) => { if (val > 0) eligiblePositions.push(p); });
-    }
-    if (eligiblePositions.length === 0) eligiblePositions.push(bio.pos);
-
-    const isPitcher = PITCHER_POS.has(bio.pos);
-    const isPositionPlayer = !isPitcher || eligiblePositions.some(
-      (p) => !PITCHER_POS.has(p) && p !== 'P'
-    );
-    const isTwoWay = isPitcher && isPositionPlayer && eligiblePositions.length > 1;
-
-    const name = `${bio.firstName} ${bio.lastName}`.trim();
-    const id = `dump-${pid}`;
-
-    // Resolve team + park
-    const team = teamMap.get(teamId);
-    const teamName = team ? `${team.name} ${team.nickname}`.trim() : '';
-    const teamAbbr = team?.abbr || '';
-    let parkFactors: ParkFactors | null = null;
-    if (team && parkMap.has(team.parkId)) {
-      parkFactors = parkMap.get(team.parkId)!;
-    }
-
-    const cardOvr = pValue?.oa ?? Math.max(battingRatings?.ovr ?? 0, pitchingRatings?.ovr ?? 0);
-
-    // Build DumpExtraData
-    const dumpData: DumpExtraData = {
-      playerId: pid,
-      teamId,
-      teamName,
-      teamAbbr,
-      personality: bio.personality,
-      morale: bio.morale,
-      playerStrategy: bio.playerStrategy,
-      rosterInfo: data.rosterStatus.get(pid) || null,
-      contractInfo: data.contracts.get(pid) || null,
-      statcastData: data.atBatStats.get(pid) || null,
-      zoneRating,
-      catcherFraming: fldRatings?.catcherFraming ?? 0,
-      talentBattingRatings: batRatings?.talent ?? null,
-      talentPitchingRatings: pitRatings?.talent ?? null,
-      positionPotentials: fldRatings?.positionPotentials ?? {},
-      ovrByPosition: pValue?.ovrByPosition ?? {},
-      overallAbility: pValue?.oa ?? 0,
-      potential: pValue?.pot ?? 0,
-      parkFactors,
-      pitchRepertoire: pitRatings?.repertoire ?? null,
-      velocity: pitRatings?.velocity ?? 0,
-      armSlot: pitRatings?.armSlot ?? 0,
-    };
-
-    players.push({
-      name,
-      number: bio.uniformNumber,
-      pos: bio.pos,
-      age: bio.age,
-      bats: bio.bats,
-      throws: bio.throws,
-      inf: '',
-      status: dumpData.rosterInfo?.isActive ? 'Active Roster' : 'Reserve',
-      id,
-      battingRatings,
-      pitchingRatings,
-      fieldingRatings,
-      positionRatings,
-      battingStats,
-      pitchingStats,
-      isPitcher,
-      isPositionPlayer: !isPitcher || isTwoWay,
-      isTwoWay,
-      eligiblePositions,
-      scores: { ...emptyScores },
-      hitterArchetype: null,
-      pitcherArchetype: null,
-      percentiles: {},
-      // PT fields (defaults)
-      cardOvr,
-      cardTier: getCardTier(cardOvr),
-      artifactBoosts: [],
-      effectiveBattingRatings: null,
-      effectivePitchingRatings: null,
-      effectiveFieldingRatings: null,
-      effectiveScores: { ...emptyScores },
-      hiddenPotentialGap: 0,
-      // Dump data
-      dumpData,
-    });
+    const p = buildPlayer(pid, bio, 0, ctx);
+    p.status = 'Draft Eligible';
+    players.push(p);
   }
 
   return players;

@@ -3,6 +3,7 @@ import type { AppTab } from '../../types';
 import {
   LayoutDashboard, Users, Swords, Shield, ListOrdered,
   RotateCcw, Upload, Settings, Activity, TrendingUp, Sliders,
+  Building2, Star,
 } from 'lucide-react';
 
 const NAV_ITEMS: { tab: AppTab; label: string; icon: React.FC<any> }[] = [
@@ -10,6 +11,8 @@ const NAV_ITEMS: { tab: AppTab; label: string; icon: React.FC<any> }[] = [
   { tab: 'batters', label: 'Batters', icon: Swords },
   { tab: 'pitchers', label: 'Pitchers', icon: Activity },
   { tab: 'defense', label: 'Defense', icon: Shield },
+  { tab: 'organization', label: 'Organization', icon: Building2 },
+  { tab: 'prospects', label: 'Prospects & FA', icon: Star },
   { tab: 'lineups', label: 'Lineups', icon: ListOrdered },
   { tab: 'rotation', label: 'Rotation', icon: RotateCcw },
   { tab: 'trends', label: 'Trends', icon: TrendingUp },
