@@ -29,6 +29,56 @@ function getProspectScore(p: Player): number {
   return pot * 0.6 + p.cardOvr * 0.4;
 }
 
+/** Personality trait color: green = good, yellow = ok, red = bad.
+ *  For most traits, higher is better. For greed, lower is better. */
+function traitColor(value: number, invertGood = false): string {
+  const good = invertGood ? value <= 80 : value >= 150;
+  const ok = invertGood ? value <= 120 : value >= 100;
+  if (good) return 'text-emerald-400';
+  if (ok) return 'text-yellow-400';
+  return 'text-red-400';
+}
+
+function traitVal(value: number | undefined): string {
+  if (value === undefined || value === 0) return '-';
+  return String(value);
+}
+
+function PersonalityHeaders() {
+  return (
+    <>
+      <th className="text-center py-2 px-1" title="Work Ethic">WE</th>
+      <th className="text-center py-2 px-1" title="Leadership">LDR</th>
+      <th className="text-center py-2 px-1" title="Greed (lower = better)">GRD</th>
+      <th className="text-center py-2 px-1" title="Loyalty">LOY</th>
+      <th className="text-center py-2 px-1" title="Desire for Winner">WIN</th>
+    </>
+  );
+}
+
+function PersonalityCells({ p }: { p: Player }) {
+  const pers = p.dumpData?.personality;
+  return (
+    <>
+      <td className={`text-center py-1.5 px-1 text-xs ${traitColor(pers?.workEthic ?? 0)}`}>
+        {traitVal(pers?.workEthic)}
+      </td>
+      <td className={`text-center py-1.5 px-1 text-xs ${traitColor(pers?.leadership ?? 0)}`}>
+        {traitVal(pers?.leadership)}
+      </td>
+      <td className={`text-center py-1.5 px-1 text-xs ${traitColor(pers?.greed ?? 0, true)}`}>
+        {traitVal(pers?.greed)}
+      </td>
+      <td className={`text-center py-1.5 px-1 text-xs ${traitColor(pers?.loyalty ?? 0)}`}>
+        {traitVal(pers?.loyalty)}
+      </td>
+      <td className={`text-center py-1.5 px-1 text-xs ${traitColor(pers?.playForWinner ?? 0)}`}>
+        {traitVal(pers?.playForWinner)}
+      </td>
+    </>
+  );
+}
+
 function getWar(p: Player): number | null {
   if (p.isPitcher && p.pitchingStats?.war != null) return p.pitchingStats.war;
   if (!p.isPitcher && p.battingStats?.war != null) return p.battingStats.war;
@@ -117,6 +167,7 @@ function ProspectsSection({ players }: { players: Player[] }) {
             <th className="text-center py-2 px-1">POT</th>
             <th className="text-center py-2 px-1">Score</th>
             <th className="text-center py-2 px-2">ETA</th>
+            <PersonalityHeaders />
           </tr>
         </thead>
         <tbody>
@@ -150,6 +201,7 @@ function ProspectsSection({ players }: { players: Player[] }) {
                 <td className="text-center py-1.5 px-2 text-xs text-gray-300">
                   {estimateEta(p.age, pot, p.cardOvr)}
                 </td>
+                <PersonalityCells p={p} />
               </tr>
             );
           })}
@@ -187,6 +239,7 @@ function DraftSection({ draftPlayers }: { draftPlayers: Player[] }) {
             <th className="text-center py-2 px-1">OVR</th>
             <th className="text-center py-2 px-1">Gap</th>
             <th className="text-center py-2 px-1">B/T</th>
+            <PersonalityHeaders />
           </tr>
         </thead>
         <tbody>
@@ -214,6 +267,7 @@ function DraftSection({ draftPlayers }: { draftPlayers: Player[] }) {
                 <td className="text-center py-1.5 px-1 text-xs text-gray-400">
                   {p.bats}/{p.throws}
                 </td>
+                <PersonalityCells p={p} />
               </tr>
             );
           })}
@@ -249,6 +303,7 @@ function FreeAgentsSection({ freeAgents }: { freeAgents: Player[] }) {
             <th className="text-center py-2 px-1">B/T</th>
             <th className="text-center py-2 px-1">Role</th>
             <th className="text-center py-2 px-1">WAR</th>
+            <PersonalityHeaders />
           </tr>
         </thead>
         <tbody>
@@ -276,6 +331,7 @@ function FreeAgentsSection({ freeAgents }: { freeAgents: Player[] }) {
                 <td className="text-center py-1.5 px-1 text-xs text-gray-300">
                   {war != null ? war.toFixed(1) : '-'}
                 </td>
+                <PersonalityCells p={p} />
               </tr>
             );
           })}
