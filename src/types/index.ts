@@ -294,6 +294,8 @@ export interface Player extends PlayerBase {
   effectiveFieldingRatings: FieldingRatings | null;
   effectiveScores: PlayerScores;
   hiddenPotentialGap: number;
+  // Dump import extra data (populated only when importing from OOTP dump folder)
+  dumpData: DumpExtraData | null;
 }
 
 // ============================================================
@@ -525,4 +527,161 @@ export interface TournamentConfig {
   ovrCap: number;
   tierFilter: CardTier[];
   prioritizeArtifacts: boolean;
+}
+
+// ============================================================
+// OOTP Dump Import Types
+// ============================================================
+
+export type ImportMode = 'manual' | 'dump';
+
+export type DumpFileType =
+  | 'dump_players'
+  | 'dump_players_batting'
+  | 'dump_players_pitching'
+  | 'dump_players_fielding'
+  | 'dump_players_value'
+  | 'dump_career_batting'
+  | 'dump_career_pitching'
+  | 'dump_career_fielding'
+  | 'dump_roster_status'
+  | 'dump_contract'
+  | 'dump_team_roster'
+  | 'dump_teams'
+  | 'dump_parks'
+  | 'dump_at_bat_stats';
+
+export interface DumpFileInfo {
+  type: DumpFileType;
+  fileName: string;
+  rowCount: number;
+  loaded: boolean;
+  tier: 1 | 2;
+}
+
+export const DUMP_FILE_MAP: Record<string, { type: DumpFileType; tier: 1 | 2; label: string }> = {
+  'players.csv':                    { type: 'dump_players',          tier: 1, label: 'Players (Bio/Personality)' },
+  'players_batting.csv':            { type: 'dump_players_batting',  tier: 1, label: 'Batting Ratings' },
+  'players_pitching.csv':           { type: 'dump_players_pitching', tier: 1, label: 'Pitching Ratings' },
+  'players_fielding.csv':           { type: 'dump_players_fielding', tier: 1, label: 'Fielding Ratings' },
+  'players_value.csv':              { type: 'dump_players_value',    tier: 1, label: 'Player Values (OVR/OA/POT)' },
+  'players_career_batting_stats.csv':  { type: 'dump_career_batting',  tier: 1, label: 'Career Batting Stats' },
+  'players_career_pitching_stats.csv': { type: 'dump_career_pitching', tier: 1, label: 'Career Pitching Stats' },
+  'players_career_fielding_stats.csv': { type: 'dump_career_fielding', tier: 1, label: 'Career Fielding Stats (ZR)' },
+  'players_roster_status.csv':      { type: 'dump_roster_status',    tier: 2, label: 'Roster Status' },
+  'players_contract.csv':           { type: 'dump_contract',         tier: 2, label: 'Contracts' },
+  'team_roster.csv':                { type: 'dump_team_roster',      tier: 2, label: 'Team Rosters' },
+  'teams.csv':                      { type: 'dump_teams',            tier: 2, label: 'Teams' },
+  'parks.csv':                      { type: 'dump_parks',            tier: 2, label: 'Parks (Factors)' },
+  'players_at_bat_batting_stats.csv': { type: 'dump_at_bat_stats',   tier: 2, label: 'At-Bat Stats (Statcast)' },
+};
+
+export interface PlayerPersonality {
+  greed: number;
+  loyalty: number;
+  playForWinner: number;
+  workEthic: number;
+  intelligence: number;
+  leadership: number;
+}
+
+export interface PlayerStrategySettings {
+  stealing: number;
+  running: number;
+  buntForHit: number;
+  sacBunt: number;
+  hitRun: number;
+  hookStart: number;
+  hookRelief: number;
+  pitchCount: number;
+  pitchAround: number;
+  neverPinchHit: number;
+  defensiveSub: number;
+}
+
+export interface RosterInfo {
+  playingLevel: number;
+  isActive: boolean;
+  isOnDL: boolean;
+  isOnDL60: boolean;
+  mlbServiceYears: number;
+  mlbServiceDays: number;
+  proServiceYears: number;
+  optionsUsed: number;
+  isOnWaivers: boolean;
+  designatedForAssignment: boolean;
+  wasTrade: boolean;
+}
+
+export interface ContractInfo {
+  salaries: number[];
+  totalYears: number;
+  currentYear: number;
+  noTrade: boolean;
+  isMajor: boolean;
+  teamOption: boolean;
+  playerOption: boolean;
+}
+
+export interface StatcastData {
+  avgExitVelo: number;
+  maxExitVelo: number;
+  avgLaunchAngle: number;
+  sprintSpeed: number;
+  hardHitPct: number;
+  barrelPct: number;
+  totalBattedBalls: number;
+}
+
+export interface ParkFactors {
+  parkId: number;
+  name: string;
+  avg: number;
+  avgL: number;
+  avgR: number;
+  doubles: number;
+  triples: number;
+  hr: number;
+  hrR: number;
+  hrL: number;
+}
+
+export interface PitchRepertoire {
+  fastball: number;
+  slider: number;
+  curveball: number;
+  changeup: number;
+  sinker: number;
+  cutter: number;
+  splitter: number;
+  knuckleball: number;
+  knucklecurve: number;
+  circlechange: number;
+  screwball: number;
+  forkball: number;
+}
+
+export interface DumpExtraData {
+  playerId: number;
+  teamId: number;
+  teamName: string;
+  teamAbbr: string;
+  personality: PlayerPersonality;
+  morale: number;
+  playerStrategy: PlayerStrategySettings;
+  rosterInfo: RosterInfo | null;
+  contractInfo: ContractInfo | null;
+  statcastData: StatcastData | null;
+  zoneRating: number;
+  catcherFraming: number;
+  talentBattingRatings: BattingRatings | null;
+  talentPitchingRatings: PitchingRatings | null;
+  positionPotentials: Record<string, number>;
+  ovrByPosition: Record<string, number>;
+  overallAbility: number;
+  potential: number;
+  parkFactors: ParkFactors | null;
+  pitchRepertoire: PitchRepertoire | null;
+  velocity: number;
+  armSlot: number;
 }

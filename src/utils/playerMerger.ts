@@ -150,5 +150,6 @@ function buildPlayer(raw: RawPlayerData): Player {
     effectiveFieldingRatings: null,
     effectiveScores: emptyScores,
     hiddenPotentialGap: 0,
+    dumpData: null,
   };
 }
