@@ -292,34 +292,67 @@ export const useStore = create<AppState>((set, get) => ({
         })),
       });
 
-      // Read all files
-      const fileTexts = new Map<DumpFileType, string>();
+      // Helper: yield to the main thread so the UI can update
+      const yieldToUI = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+      // Sort recognized files: process at-bat stats LAST (it's huge)
+      recognized.sort((a, b) => {
+        if (a.type === 'dump_at_bat_stats') return 1;
+        if (b.type === 'dump_at_bat_stats') return -1;
+        return 0;
+      });
+
+      // Read and parse each file one at a time, yielding between steps
+      const totalSteps = recognized.length;
+      parsedData = {
+        players: new Map(), battingRatings: new Map(), pitchingRatings: new Map(),
+        fieldingRatings: new Map(), playerValues: new Map(),
+        careerBatting: [], careerPitching: [], careerFielding: [],
+        rosterStatus: new Map(), contracts: new Map(), teamRoster: [],
+        teams: new Map(), parks: new Map(), atBatStats: new Map(),
+      };
+
+      const parseFn: Record<string, (text: string) => void> = {
+        dump_players: (t) => { parsedData.players = parseDumpPlayers(t); },
+        dump_players_batting: (t) => { parsedData.battingRatings = parseDumpBattingRatings(t); },
+        dump_players_pitching: (t) => { parsedData.pitchingRatings = parseDumpPitchingRatings(t); },
+        dump_players_fielding: (t) => { parsedData.fieldingRatings = parseDumpFieldingRatings(t); },
+        dump_players_value: (t) => { parsedData.playerValues = parseDumpPlayerValues(t); },
+        dump_career_batting: (t) => { parsedData.careerBatting = parseDumpCareerBatting(t); },
+        dump_career_pitching: (t) => { parsedData.careerPitching = parseDumpCareerPitching(t); },
+        dump_career_fielding: (t) => { parsedData.careerFielding = parseDumpCareerFielding(t); },
+        dump_roster_status: (t) => { parsedData.rosterStatus = parseDumpRosterStatus(t); },
+        dump_contract: (t) => { parsedData.contracts = parseDumpContracts(t); },
+        dump_team_roster: (t) => { parsedData.teamRoster = parseDumpTeamRoster(t); },
+        dump_teams: (t) => { parsedData.teams = parseDumpTeams(t); },
+        dump_parks: (t) => { parsedData.parks = parseDumpParks(t); },
+        dump_at_bat_stats: (t) => { parsedData.atBatStats = parseDumpAtBatStats(t); },
+      };
+
       for (let i = 0; i < recognized.length; i++) {
         const r = recognized[i];
-        set({ dumpProgress: { total: recognized.length, loaded: i, currentFile: r.label } });
+        set({ dumpProgress: { total: totalSteps, loaded: i, currentFile: `Reading ${r.label}...` } });
+        await yieldToUI();
+
+        // Read file
         const text = await r.file.text();
-        fileTexts.set(r.type, text);
+
+        // Parse (sync but yields before and after to keep UI alive)
+        set({ dumpProgress: { total: totalSteps, loaded: i, currentFile: `Parsing ${r.label}...` } });
+        await yieldToUI();
+
+        // Skip at-bat stats if the file is very large (>50MB) to prevent freeze
+        if (r.type === 'dump_at_bat_stats' && text.length > 50_000_000) {
+          console.warn(`Skipping ${r.file.name}: file too large (${(text.length / 1048576).toFixed(0)}MB). Statcast data will not be available.`);
+        } else {
+          parseFn[r.type]?.(text);
+        }
+
+        await yieldToUI();
       }
 
-      set({ dumpProgress: { total: recognized.length, loaded: recognized.length, currentFile: 'Merging data...' } });
-
-      // Parse each file type
-      parsedData = {
-        players: fileTexts.has('dump_players') ? parseDumpPlayers(fileTexts.get('dump_players')!) : new Map(),
-        battingRatings: fileTexts.has('dump_players_batting') ? parseDumpBattingRatings(fileTexts.get('dump_players_batting')!) : new Map(),
-        pitchingRatings: fileTexts.has('dump_players_pitching') ? parseDumpPitchingRatings(fileTexts.get('dump_players_pitching')!) : new Map(),
-        fieldingRatings: fileTexts.has('dump_players_fielding') ? parseDumpFieldingRatings(fileTexts.get('dump_players_fielding')!) : new Map(),
-        playerValues: fileTexts.has('dump_players_value') ? parseDumpPlayerValues(fileTexts.get('dump_players_value')!) : new Map(),
-        careerBatting: fileTexts.has('dump_career_batting') ? parseDumpCareerBatting(fileTexts.get('dump_career_batting')!) : [],
-        careerPitching: fileTexts.has('dump_career_pitching') ? parseDumpCareerPitching(fileTexts.get('dump_career_pitching')!) : [],
-        careerFielding: fileTexts.has('dump_career_fielding') ? parseDumpCareerFielding(fileTexts.get('dump_career_fielding')!) : [],
-        rosterStatus: fileTexts.has('dump_roster_status') ? parseDumpRosterStatus(fileTexts.get('dump_roster_status')!) : new Map(),
-        contracts: fileTexts.has('dump_contract') ? parseDumpContracts(fileTexts.get('dump_contract')!) : new Map(),
-        teamRoster: fileTexts.has('dump_team_roster') ? parseDumpTeamRoster(fileTexts.get('dump_team_roster')!) : [],
-        teams: fileTexts.has('dump_teams') ? parseDumpTeams(fileTexts.get('dump_teams')!) : new Map(),
-        parks: fileTexts.has('dump_parks') ? parseDumpParks(fileTexts.get('dump_parks')!) : new Map(),
-        atBatStats: fileTexts.has('dump_at_bat_stats') ? parseDumpAtBatStats(fileTexts.get('dump_at_bat_stats')!) : new Map(),
-      };
+      set({ dumpProgress: { total: totalSteps, loaded: totalSteps, currentFile: 'Merging data...' } });
+      await yieldToUI();
 
       // Cache for re-merge
       (globalThis as any).__cachedDumpData = parsedData;
