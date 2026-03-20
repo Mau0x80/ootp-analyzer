@@ -25,7 +25,7 @@ import {
 // Types
 // ============================================================
 
-type AnalysisTab = 'tradeValue' | 'depthChart' | 'injuryRisk' | 'agingCurves' | 'platoon';
+type AnalysisTab = 'tradeValue' | 'depthChart' | 'injuryRisk' | 'agingCurves' | 'platoon' | 'slamDunks';
 
 interface TradeValuePlayer {
   player: Player;
@@ -101,6 +101,7 @@ const TAB_CONFIG: { key: AnalysisTab; label: string; icon: React.ReactNode }[] =
   { key: 'injuryRisk', label: 'Injury Risk', icon: <Heart className="w-4 h-4" /> },
   { key: 'agingCurves', label: 'Aging Curves', icon: <Clock className="w-4 h-4" /> },
   { key: 'platoon', label: 'Platoon Optimizer', icon: <Target className="w-4 h-4" /> },
+  { key: 'slamDunks', label: 'Slam Dunks', icon: <Zap className="w-4 h-4" /> },
 ];
 
 const FIELD_POSITIONS = ['C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF', 'DH'];
@@ -1080,11 +1081,290 @@ function PlatoonTab({ players }: { players: Player[] }) {
 }
 
 // ============================================================
+// Slam Dunks — Low Cost / High Value Finder
+// ============================================================
+
+interface SlamDunkEntry {
+  player: Player;
+  category: 'bargainFA' | 'hiddenGem' | 'underutilized';
+  slamScore: number;
+  reason: string;
+  ovr: number;
+  pot: number;
+  salary: number;
+  age: number;
+}
+
+function findSlamDunks(
+  orgPlayers: Player[],
+  freeAgents: Player[],
+  draftPlayers: Player[],
+): SlamDunkEntry[] {
+  const entries: SlamDunkEntry[] = [];
+
+  // --- Bargain Free Agents ---
+  // High OVR or POT relative to expected salary / age
+  for (const p of freeAgents) {
+    const ovr = getOvr(p);
+    const pot = getPotential(p);
+    const salary = getCurrentSalary(p);
+    const pers = p.dumpData?.personality;
+    const age = p.age;
+
+    // Value: good player, cheap or free
+    let score = 0;
+    if (ovr >= 45) score += (ovr - 40) * 1.5;
+    if (pot >= 50) score += (pot - 45) * 0.8;
+    if (age <= 28) score += (29 - age) * 3;
+    if (salary === 0) score += 15;
+    else if (salary < 1_000_000) score += 10;
+    else if (salary < 5_000_000) score += 5;
+    // Personality bonuses
+    if (pers) {
+      if (pers.greed <= 80) score += 8;
+      if (pers.workEthic >= 140) score += 5;
+      if (pers.loyalty >= 140) score += 3;
+    }
+
+    if (score >= 25) {
+      const reasons: string[] = [];
+      if (salary === 0) reasons.push('Free');
+      else if (salary < 2_000_000) reasons.push('Cheap');
+      if (ovr >= 55) reasons.push(`${ovr} OVR`);
+      if (pot > ovr + 15) reasons.push('High ceiling');
+      if (age <= 25) reasons.push('Young');
+      if (pers && pers.greed <= 60) reasons.push('Low greed');
+      if (pers && pers.workEthic >= 160) reasons.push('Hard worker');
+      entries.push({
+        player: p,
+        category: 'bargainFA',
+        slamScore: Math.round(score),
+        reason: reasons.join(' · ') || 'Good value',
+        ovr, pot, salary, age,
+      });
+    }
+  }
+
+  // --- Hidden Gems (from draft pool) ---
+  for (const p of draftPlayers) {
+    const ovr = getOvr(p);
+    const pot = getPotential(p);
+    const age = p.age;
+    const pers = p.dumpData?.personality;
+
+    let score = 0;
+    if (pot >= 55) score += (pot - 45) * 1.5;
+    if (age <= 22) score += (23 - age) * 4;
+    if (pers) {
+      if (pers.workEthic >= 150) score += 8;
+      if (pers.intelligence >= 140) score += 5;
+    }
+    // Talent vs current gap
+    const talentOvr = p.dumpData?.talentBattingRatings?.ovr ?? p.dumpData?.talentPitchingRatings?.ovr ?? 0;
+    if (talentOvr > ovr + 10) score += (talentOvr - ovr) * 0.8;
+
+    if (score >= 30) {
+      const reasons: string[] = [];
+      if (pot >= 65) reasons.push(`${pot} POT`);
+      else if (pot >= 55) reasons.push(`${pot} POT`);
+      if (talentOvr > ovr + 10) reasons.push(`Talent gap +${talentOvr - ovr}`);
+      if (age <= 20) reasons.push('Very young');
+      if (pers && pers.workEthic >= 160) reasons.push('Hard worker');
+      if (pers && pers.intelligence >= 160) reasons.push('High IQ');
+      entries.push({
+        player: p,
+        category: 'hiddenGem',
+        slamScore: Math.round(score),
+        reason: reasons.join(' · ') || 'High potential',
+        ovr, pot, salary: 0, age,
+      });
+    }
+  }
+
+  // --- Underutilized in Organization ---
+  // Players in org who are at a low level but have high OVR/POT
+  for (const p of orgPlayers) {
+    const ovr = getOvr(p);
+    const pot = getPotential(p);
+    const age = p.age;
+    const level = p.dumpData?.rosterInfo?.playingLevel ?? 0;
+    const talentOvr = p.dumpData?.talentBattingRatings?.ovr ?? p.dumpData?.talentPitchingRatings?.ovr ?? 0;
+
+    let score = 0;
+    // High OVR stuck in minors
+    if (level > 1 && ovr >= 50) score += (ovr - 45) * 1.2;
+    if (level > 3 && ovr >= 45) score += 10; // AA or lower with decent OVR
+    if (pot > ovr + 15) score += (pot - ovr) * 0.6;
+    if (talentOvr > ovr + 10) score += (talentOvr - ovr) * 0.5;
+    if (age <= 25 && pot >= 55) score += 8;
+
+    const pers = p.dumpData?.personality;
+    if (pers && pers.workEthic >= 150) score += 4;
+
+    if (score >= 25 && level > 1) {
+      const levelName = getLevelName(level);
+      const reasons: string[] = [];
+      reasons.push(`${levelName} with ${ovr} OVR`);
+      if (pot > ovr + 15) reasons.push(`${pot} POT`);
+      if (talentOvr > ovr + 10) reasons.push(`Talent +${talentOvr - ovr}`);
+      if (age <= 23) reasons.push('Young');
+      entries.push({
+        player: p,
+        category: 'underutilized',
+        slamScore: Math.round(score),
+        reason: reasons.join(' · '),
+        ovr, pot, salary: getCurrentSalary(p), age,
+      });
+    }
+  }
+
+  return entries.sort((a, b) => b.slamScore - a.slamScore);
+}
+
+function getCurrentSalary(p: Player): number {
+  const ci = p.dumpData?.contractInfo;
+  if (!ci || !ci.salaries.length || ci.currentYear < 1) return 0;
+  return ci.salaries[ci.currentYear - 1] || 0;
+}
+
+function getLevelName(level: number): string {
+  if (level === 1) return 'MLB';
+  if (level <= 3) return 'AAA';
+  if (level <= 5) return 'AA';
+  if (level <= 7) return 'A+';
+  if (level <= 9) return 'A';
+  return 'Rookie';
+}
+
+const CATEGORY_CONFIG: Record<SlamDunkEntry['category'], { label: string; color: string; bgColor: string }> = {
+  bargainFA: { label: 'Bargain FA', color: 'text-green-400', bgColor: 'bg-green-500/10 border-green-500/20' },
+  hiddenGem: { label: 'Hidden Gem', color: 'text-purple-400', bgColor: 'bg-purple-500/10 border-purple-500/20' },
+  underutilized: { label: 'Underutilized', color: 'text-amber-400', bgColor: 'bg-amber-500/10 border-amber-500/20' },
+};
+
+function SlamDunksTab({ players, freeAgents, draftPlayers }: { players: Player[]; freeAgents: Player[]; draftPlayers: Player[] }) {
+  const setSelectedPlayer = useStore((s) => s.setSelectedPlayer);
+  const [filterCat, setFilterCat] = useState<SlamDunkEntry['category'] | 'all'>('all');
+
+  const allEntries = useMemo(
+    () => findSlamDunks(players, freeAgents, draftPlayers),
+    [players, freeAgents, draftPlayers],
+  );
+
+  const entries = filterCat === 'all' ? allEntries : allEntries.filter((e) => e.category === filterCat);
+
+  const counts = useMemo(() => {
+    const c = { bargainFA: 0, hiddenGem: 0, underutilized: 0 };
+    allEntries.forEach((e) => c[e.category]++);
+    return c;
+  }, [allEntries]);
+
+  if (allEntries.length === 0) {
+    return (
+      <div className="card p-8 text-center text-gray-500">
+        <Zap className="w-10 h-10 mx-auto mb-3 opacity-30" />
+        <p className="text-sm">No slam dunks found. Load dump folder data with free agents and draft players to see opportunities.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Summary cards */}
+      <div className="grid grid-cols-3 gap-3">
+        {(Object.entries(CATEGORY_CONFIG) as [SlamDunkEntry['category'], typeof CATEGORY_CONFIG[SlamDunkEntry['category']]][]).map(
+          ([key, cfg]) => (
+            <button
+              key={key}
+              onClick={() => setFilterCat(filterCat === key ? 'all' : key)}
+              className={`p-3 rounded-lg border text-left transition-colors ${
+                filterCat === key
+                  ? cfg.bgColor + ' border-current'
+                  : 'bg-gray-800/30 border-gray-700/50 hover:bg-gray-800/60'
+              }`}
+            >
+              <p className={`text-lg font-bold ${cfg.color}`}>{counts[key]}</p>
+              <p className="text-xs text-gray-400">{cfg.label}</p>
+            </button>
+          ),
+        )}
+      </div>
+
+      {/* Results table */}
+      <div className="card overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b border-gray-700/50 text-gray-400">
+              <th className="py-2 px-2 text-left font-medium">Score</th>
+              <th className="py-2 px-2 text-left font-medium">Type</th>
+              <th className="py-2 px-2 text-left font-medium">Player</th>
+              <th className="py-2 px-2 text-left font-medium">Pos</th>
+              <th className="py-2 px-2 text-right font-medium">Age</th>
+              <th className="py-2 px-2 text-right font-medium">OVR</th>
+              <th className="py-2 px-2 text-right font-medium">POT</th>
+              <th className="py-2 px-2 text-right font-medium">Salary</th>
+              <th className="py-2 px-2 text-left font-medium">Why</th>
+            </tr>
+          </thead>
+          <tbody>
+            {entries.slice(0, 50).map((e, i) => {
+              const cfg = CATEGORY_CONFIG[e.category];
+              return (
+                <tr
+                  key={`${e.player.id}-${i}`}
+                  onClick={() => setSelectedPlayer(e.player.id)}
+                  className="border-b border-gray-800/50 hover:bg-gray-800/40 cursor-pointer"
+                >
+                  <td className="py-1.5 px-2">
+                    <span className={`font-bold ${e.slamScore >= 50 ? 'text-green-400' : e.slamScore >= 35 ? 'text-yellow-400' : 'text-gray-300'}`}>
+                      {e.slamScore}
+                    </span>
+                  </td>
+                  <td className="py-1.5 px-2">
+                    <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium border ${cfg.bgColor}`}>
+                      {cfg.label}
+                    </span>
+                  </td>
+                  <td className="py-1.5 px-2 font-medium text-gray-200">{e.player.name}</td>
+                  <td className="py-1.5 px-2 text-gray-400">{e.player.pos}</td>
+                  <td className="py-1.5 px-2 text-right text-gray-300">{e.age}</td>
+                  <td className="py-1.5 px-2 text-right">
+                    <span className={e.ovr >= 55 ? 'text-green-400' : e.ovr >= 45 ? 'text-yellow-400' : 'text-gray-400'}>
+                      {e.ovr}
+                    </span>
+                  </td>
+                  <td className="py-1.5 px-2 text-right">
+                    <span className={e.pot >= 65 ? 'text-purple-400' : e.pot >= 50 ? 'text-blue-400' : 'text-gray-400'}>
+                      {e.pot}
+                    </span>
+                  </td>
+                  <td className="py-1.5 px-2 text-right text-gray-300">
+                    {e.salary === 0 ? <span className="text-green-500">Free</span> : fmtMoney(e.salary)}
+                  </td>
+                  <td className="py-1.5 px-2 text-gray-400 max-w-[200px] truncate" title={e.reason}>
+                    {e.reason}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {entries.length > 50 && (
+          <p className="text-[10px] text-gray-500 p-2 text-center">Showing top 50 of {entries.length}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
 // Main Component
 // ============================================================
 
 export default function Analysis() {
   const players = useStore((s) => s.players);
+  const freeAgents = useStore((s) => s.freeAgents);
+  const draftPlayers = useStore((s) => s.draftPlayers);
   const [activeTab, setActiveTab] = useState<AnalysisTab>('tradeValue');
 
   return (
@@ -1127,6 +1407,7 @@ export default function Analysis() {
       {activeTab === 'injuryRisk' && <InjuryRiskTab players={players} />}
       {activeTab === 'agingCurves' && <AgingCurvesTab players={players} />}
       {activeTab === 'platoon' && <PlatoonTab players={players} />}
+      {activeTab === 'slamDunks' && <SlamDunksTab players={players} freeAgents={freeAgents} draftPlayers={draftPlayers} />}
     </div>
   );
 }
