@@ -391,10 +391,20 @@ export const useStore = create<AppState>((set, get) => ({
       parsedData = (globalThis as any).__cachedDumpData as ParsedDumpData;
     }
 
-    // Merge into Player[]
+    // Merge into Player[] with UI yields between heavy steps
+    const yieldMerge = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
     const filterTeamId = get().dumpFilterTeamId;
+
+    set({ dumpProgress: { total: 1, loaded: 0, currentFile: 'Merging player data...' } });
+    await yieldMerge();
     const merged = mergeDumpData(parsedData, filterTeamId);
-    const scored = scoreAllPlayers(merged, state.settings);
+
+    set({ dumpProgress: { total: 1, loaded: 0, currentFile: `Scoring ${merged.length} players...` } });
+    await yieldMerge();
+    const scored = scoreAllPlayers(merged, get().settings);
+
+    set({ dumpProgress: { total: 1, loaded: 0, currentFile: 'Computing percentiles...' } });
+    await yieldMerge();
     const withPercentiles = calcPercentiles(scored);
 
     set({

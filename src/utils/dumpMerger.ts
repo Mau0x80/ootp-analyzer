@@ -216,13 +216,22 @@ export function mergeDumpData(data: ParsedDumpData, filterTeamId?: number): Play
     careerFieldByPlayer.get(row.playerId)!.push(row);
   }
 
-  for (const [pid, bio] of data.players) {
-    // Optional team filter
-    const teamId = playerTeamMap.get(pid) ?? bio.teamId;
-    if (filterTeamId !== undefined && teamId !== filterTeamId) continue;
+  // Build set of MLB-level team IDs (level === 1)
+  const mlbTeamIds = new Set<number>();
+  for (const [tid, team] of data.teams) {
+    if (team.level === 1) mlbTeamIds.add(tid);
+  }
 
-    // Skip retired / free agent with no team if filtering
-    if (filterTeamId !== undefined && teamId === 0) continue;
+  for (const [pid, bio] of data.players) {
+    const teamId = playerTeamMap.get(pid) ?? bio.teamId;
+
+    if (filterTeamId !== undefined && filterTeamId > 0) {
+      // Specific team filter
+      if (teamId !== filterTeamId) continue;
+    } else {
+      // No filter: only include players on MLB-level teams
+      if (teamId === 0 || !mlbTeamIds.has(teamId)) continue;
+    }
 
     const batRatings = data.battingRatings.get(pid);
     const pitRatings = data.pitchingRatings.get(pid);
