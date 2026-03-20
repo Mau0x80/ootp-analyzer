@@ -126,27 +126,27 @@ function ManualImport() {
 // ============================================================
 
 function DumpFolderImport() {
-  const loadDumpFolder = useStore((s) => s.loadDumpFolder);
+  const scanDumpFolder = useStore((s) => s.scanDumpFolder);
   const dumpFiles = useStore((s) => s.dumpFiles);
   const dumpProgress = useStore((s) => s.dumpProgress);
   const dumpTeams = useStore((s) => s.dumpTeams);
   const dumpFilterTeamId = useStore((s) => s.dumpFilterTeamId);
   const setDumpFilterTeamId = useStore((s) => s.setDumpFilterTeamId);
+  const playerCount = useStore((s) => s.players.length);
   const [dragOver, setDragOver] = useState(false);
 
   const handleFolder = useCallback(
     (files: FileList | null) => {
       if (!files || files.length === 0) return;
-      void loadDumpFolder(files);
+      void scanDumpFolder(files);
     },
-    [loadDumpFolder]
+    [scanDumpFolder]
   );
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
       setDragOver(false);
-      // Try to get files from items (handles folders in Chrome/Edge)
       const items = e.dataTransfer.items;
       if (items && items.length > 0) {
         const fileList: File[] = [];
@@ -163,8 +163,8 @@ function DumpFolderImport() {
                     pending--;
                     if (pending <= 0) {
                       const dt = new DataTransfer();
-                      fileList.forEach((f) => dt.items.add(f));
-                      void loadDumpFolder(dt.files);
+                      fileList.forEach((fl) => dt.items.add(fl));
+                      void scanDumpFolder(dt.files);
                     }
                   });
                 } else {
@@ -180,14 +180,14 @@ function DumpFolderImport() {
         }
         if (pending <= 0 && fileList.length > 0) {
           const dt = new DataTransfer();
-          fileList.forEach((f) => dt.items.add(f));
-          void loadDumpFolder(dt.files);
+          fileList.forEach((fl) => dt.items.add(fl));
+          void scanDumpFolder(dt.files);
         }
       } else {
         handleFolder(e.dataTransfer.files);
       }
     },
-    [loadDumpFolder, handleFolder]
+    [scanDumpFolder, handleFolder]
   );
 
   const allDumpFiles = Object.entries(DUMP_FILE_MAP);
@@ -195,6 +195,9 @@ function DumpFolderImport() {
 
   const tier1Files = allDumpFiles.filter(([, info]) => info.tier === 1);
   const tier2Files = allDumpFiles.filter(([, info]) => info.tier === 2);
+
+  const folderScanned = dumpTeams.length > 0;
+  const isLoading = dumpProgress !== null;
 
   return (
     <div className="space-y-4">
@@ -208,7 +211,9 @@ function DumpFolderImport() {
         }`}
       >
         <FolderOpen className="w-10 h-10 mx-auto text-blue-400 mb-3" />
-        <p className="text-lg font-medium text-gray-300">Drop your OOTP dump folder here</p>
+        <p className="text-lg font-medium text-gray-300">
+          {folderScanned ? 'Dump folder loaded — select a team below' : 'Drop your OOTP dump folder here'}
+        </p>
         <p className="text-xs text-gray-500 mt-1">
           Or select the dump folder from your OOTP saved game
         </p>
@@ -222,13 +227,13 @@ function DumpFolderImport() {
             className="hidden"
           />
           <span className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium cursor-pointer">
-            Select Dump Folder
+            {folderScanned ? 'Change Folder' : 'Select Dump Folder'}
           </span>
         </label>
       </div>
 
       {/* Progress */}
-      {dumpProgress && (
+      {isLoading && (
         <div className="card p-4">
           <div className="flex items-center gap-3">
             <div className="animate-spin w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full" />
@@ -246,87 +251,111 @@ function DumpFolderImport() {
         </div>
       )}
 
-      {/* Team filter */}
-      {dumpTeams.length > 0 && (
-        <div className="card p-4 flex items-center justify-between">
-          <div>
-            <p className="text-sm font-medium text-gray-300">Filter by Team</p>
-            <p className="text-xs text-gray-500">Show only players from a specific team</p>
+      {/* Team selector — required step before loading data */}
+      {folderScanned && (
+        <div className="card p-5 border-blue-500/30 bg-blue-500/5">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-semibold text-blue-300">Select Your Team</p>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Choose your MLB team to load its roster and minor league affiliates
+              </p>
+            </div>
+            <select
+              value={dumpFilterTeamId ?? ''}
+              onChange={(e) => setDumpFilterTeamId(e.target.value ? parseInt(e.target.value) : undefined)}
+              disabled={isLoading}
+              className="px-3 py-2 text-sm bg-gray-800 border border-gray-600 rounded-lg text-white min-w-[260px] disabled:opacity-50"
+            >
+              <option value="">-- Select a team --</option>
+              {dumpTeams.map((t) => (
+                <option key={t.id} value={t.id}>{t.abbr} — {t.name}</option>
+              ))}
+            </select>
           </div>
-          <select
-            value={dumpFilterTeamId ?? ''}
-            onChange={(e) => setDumpFilterTeamId(e.target.value ? parseInt(e.target.value) : undefined)}
-            className="px-3 py-1.5 text-sm bg-gray-800 border border-gray-700 rounded-lg text-white"
-          >
-            <option value="">All Teams</option>
-            {dumpTeams.map((t) => (
-              <option key={t.id} value={t.id}>{t.abbr} — {t.name}</option>
-            ))}
-          </select>
+          {dumpFilterTeamId !== undefined && playerCount > 0 && !isLoading && (
+            <p className="text-xs text-emerald-400 mt-2">
+              {playerCount} players loaded for this organization
+            </p>
+          )}
         </div>
       )}
 
-      {/* File status - Tier 1 */}
-      <div className="card p-4">
-        <h2 className="text-sm font-semibold text-gray-300 mb-3">
-          <span className="text-emerald-400">Tier 1</span> — Essential Files
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {tier1Files.map(([fileName, info]) => {
-            const loaded = loadedTypes.has(info.type);
-            const fInfo = dumpFiles.find((f) => f.type === info.type);
-            return (
-              <div key={fileName} className={`flex items-center gap-3 p-3 rounded-lg border ${
-                loaded ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-gray-700 bg-gray-800/50'
-              }`}>
-                {loaded
-                  ? <CheckCircle className="w-5 h-5 text-emerald-400 shrink-0" />
-                  : <FileText className="w-5 h-5 text-gray-500 shrink-0" />}
-                <div className="flex-1 min-w-0">
-                  <p className={`text-sm font-medium ${loaded ? 'text-emerald-300' : 'text-gray-400'}`}>
-                    {info.label}
-                  </p>
-                  <p className="text-[10px] text-gray-600">{fileName}</p>
-                  {fInfo && fInfo.loaded && (
-                    <p className="text-xs text-gray-500">{fInfo.rowCount.toLocaleString()} records</p>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      {/* File status grids — only show after data is loaded */}
+      {dumpFiles.some((f) => f.loaded) && (
+        <>
+          {/* File status - Tier 1 */}
+          <div className="card p-4">
+            <h2 className="text-sm font-semibold text-gray-300 mb-3">
+              <span className="text-emerald-400">Tier 1</span> — Essential Files
+            </h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {tier1Files.map(([fileName, info]) => {
+                const loaded = loadedTypes.has(info.type);
+                const fInfo = dumpFiles.find((f) => f.type === info.type);
+                return (
+                  <div key={fileName} className={`flex items-center gap-3 p-3 rounded-lg border ${
+                    loaded ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-gray-700 bg-gray-800/50'
+                  }`}>
+                    {loaded
+                      ? <CheckCircle className="w-5 h-5 text-emerald-400 shrink-0" />
+                      : <FileText className="w-5 h-5 text-gray-500 shrink-0" />}
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-sm font-medium ${loaded ? 'text-emerald-300' : 'text-gray-400'}`}>
+                        {info.label}
+                      </p>
+                      <p className="text-[10px] text-gray-600">{fileName}</p>
+                      {fInfo && fInfo.loaded && (
+                        <p className="text-xs text-gray-500">{fInfo.rowCount.toLocaleString()} records</p>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
 
-      {/* File status - Tier 2 */}
-      <div className="card p-4">
-        <h2 className="text-sm font-semibold text-gray-300 mb-3">
-          <span className="text-blue-400">Tier 2</span> — High Value Files
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {tier2Files.map(([fileName, info]) => {
-            const loaded = loadedTypes.has(info.type);
-            const fInfo = dumpFiles.find((f) => f.type === info.type);
-            return (
-              <div key={fileName} className={`flex items-center gap-3 p-3 rounded-lg border ${
-                loaded ? 'border-blue-500/30 bg-blue-500/10' : 'border-gray-700 bg-gray-800/50'
-              }`}>
-                {loaded
-                  ? <CheckCircle className="w-5 h-5 text-blue-400 shrink-0" />
-                  : <FileText className="w-5 h-5 text-gray-500 shrink-0" />}
-                <div className="flex-1 min-w-0">
-                  <p className={`text-sm font-medium ${loaded ? 'text-blue-300' : 'text-gray-400'}`}>
-                    {info.label}
-                  </p>
-                  <p className="text-[10px] text-gray-600">{fileName}</p>
-                  {fInfo && fInfo.loaded && (
-                    <p className="text-xs text-gray-500">{fInfo.rowCount.toLocaleString()} records</p>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+          {/* File status - Tier 2 */}
+          <div className="card p-4">
+            <h2 className="text-sm font-semibold text-gray-300 mb-3">
+              <span className="text-blue-400">Tier 2</span> — High Value Files
+            </h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {tier2Files.map(([fileName, info]) => {
+                const loaded = loadedTypes.has(info.type);
+                const fInfo = dumpFiles.find((f) => f.type === info.type);
+                return (
+                  <div key={fileName} className={`flex items-center gap-3 p-3 rounded-lg border ${
+                    loaded ? 'border-blue-500/30 bg-blue-500/10' : 'border-gray-700 bg-gray-800/50'
+                  }`}>
+                    {loaded
+                      ? <CheckCircle className="w-5 h-5 text-blue-400 shrink-0" />
+                      : <FileText className="w-5 h-5 text-gray-500 shrink-0" />}
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-sm font-medium ${loaded ? 'text-blue-300' : 'text-gray-400'}`}>
+                        {info.label}
+                      </p>
+                      <p className="text-[10px] text-gray-600">{fileName}</p>
+                      {fInfo && fInfo.loaded && (
+                        <p className="text-xs text-gray-500">{fInfo.rowCount.toLocaleString()} records</p>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Detected files count before team selection */}
+      {folderScanned && !dumpFiles.some((f) => f.loaded) && (
+        <div className="card p-4">
+          <p className="text-sm text-gray-400">
+            {dumpFiles.length} dump files detected. Select a team above to begin loading data.
+          </p>
         </div>
-      </div>
+      )}
     </div>
   );
 }

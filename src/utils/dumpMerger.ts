@@ -216,22 +216,29 @@ export function mergeDumpData(data: ParsedDumpData, filterTeamId?: number): Play
     careerFieldByPlayer.get(row.playerId)!.push(row);
   }
 
-  // Build set of MLB-level team IDs (level === 1)
-  const mlbTeamIds = new Set<number>();
-  for (const [tid, team] of data.teams) {
-    if (team.level === 1) mlbTeamIds.add(tid);
+  // Build set of team IDs to include
+  // If filterTeamId is set, include that team + all its affiliates (minor league teams)
+  const allowedTeamIds = new Set<number>();
+  if (filterTeamId !== undefined && filterTeamId > 0) {
+    allowedTeamIds.add(filterTeamId);
+    // Add all affiliates: teams whose parentTeamId matches filterTeamId
+    for (const [tid, team] of data.teams) {
+      if (team.parentTeamId === filterTeamId) {
+        allowedTeamIds.add(tid);
+      }
+    }
+  } else {
+    // No filter: only MLB-level teams
+    for (const [tid, team] of data.teams) {
+      if (team.level === 1) allowedTeamIds.add(tid);
+    }
   }
 
   for (const [pid, bio] of data.players) {
     const teamId = playerTeamMap.get(pid) ?? bio.teamId;
 
-    if (filterTeamId !== undefined && filterTeamId > 0) {
-      // Specific team filter
-      if (teamId !== filterTeamId) continue;
-    } else {
-      // No filter: only include players on MLB-level teams
-      if (teamId === 0 || !mlbTeamIds.has(teamId)) continue;
-    }
+    // Skip players not on an allowed team
+    if (teamId === 0 || !allowedTeamIds.has(teamId)) continue;
 
     const batRatings = data.battingRatings.get(pid);
     const pitRatings = data.pitchingRatings.get(pid);

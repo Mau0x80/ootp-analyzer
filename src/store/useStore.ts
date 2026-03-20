@@ -71,7 +71,8 @@ interface AppState {
   setImportMode: (mode: ImportMode) => void;
   dumpFiles: DumpFileInfo[];
   dumpProgress: { total: number; loaded: number; currentFile: string } | null;
-  loadDumpFolder: (files: FileList) => Promise<void>;
+  scanDumpFolder: (files: FileList) => Promise<void>;
+  loadDumpTeam: () => Promise<void>;
   dumpFilterTeamId: number | undefined;
   setDumpFilterTeamId: (teamId: number | undefined) => void;
   dumpTeams: { id: number; name: string; abbr: string }[];
@@ -244,7 +245,9 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   // ============================================================
-  // Dump Folder Import
+  // Dump Folder Import (two-phase)
+  // Phase 1: scanDumpFolder — reads only teams.csv to populate team dropdown (fast)
+  // Phase 2: loadDumpTeam — user picks a team, then all files are parsed & merged
   // ============================================================
   importMode: 'manual' as ImportMode,
   setImportMode: (mode) => set({ importMode: mode }),
@@ -253,164 +256,189 @@ export const useStore = create<AppState>((set, get) => ({
   dumpFilterTeamId: undefined,
   setDumpFilterTeamId: (teamId) => {
     set({ dumpFilterTeamId: teamId });
-    // Re-merge if we have dump data
-    const state = get();
-    if (state.dumpFiles.length > 0) {
-      // Trigger a rebuild using stored raw dump data
-      void state.loadDumpFolder(null as unknown as FileList); // will use cached data
+    if (teamId !== undefined) {
+      void get().loadDumpTeam();
     }
   },
   dumpTeams: [],
 
-  loadDumpFolder: async (files: FileList) => {
-    const state = get();
+  // Phase 1: Quick scan — read only teams.csv + team_roster.csv to build team list
+  scanDumpFolder: async (files: FileList) => {
+    const fileArray = Array.from(files);
+    const csvFiles = fileArray.filter((f) => f.name.endsWith('.csv'));
+    const recognized: { file: File; type: DumpFileType; tier: 1 | 2; label: string }[] = [];
 
-    // If files is null, re-merge from already-parsed data using _cachedDumpData
-    if (!files && !(globalThis as any).__cachedDumpData) return;
-
-    let parsedData: ParsedDumpData;
-
-    if (files) {
-      // Read files and detect dump types
-      const fileArray = Array.from(files);
-      const csvFiles = fileArray.filter((f) => f.name.endsWith('.csv'));
-      const recognized: { file: File; type: DumpFileType; tier: 1 | 2; label: string }[] = [];
-
-      for (const file of csvFiles) {
-        // Extract just the filename (handle both paths and direct names)
-        const baseName = file.name.split('/').pop()!.split('\\').pop()!;
-        const info = DUMP_FILE_MAP[baseName];
-        if (info) recognized.push({ file, type: info.type, tier: info.tier, label: info.label });
-      }
-
-      if (recognized.length === 0) return;
-
-      set({
-        dumpProgress: { total: recognized.length, loaded: 0, currentFile: '' },
-        dumpFiles: recognized.map((r) => ({
-          type: r.type, fileName: r.file.name, rowCount: 0, loaded: false, tier: r.tier,
-        })),
-      });
-
-      // Helper: yield to the main thread so the UI can update
-      const yieldToUI = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
-
-      // Sort recognized files: process at-bat stats LAST (it's huge)
-      recognized.sort((a, b) => {
-        if (a.type === 'dump_at_bat_stats') return 1;
-        if (b.type === 'dump_at_bat_stats') return -1;
-        return 0;
-      });
-
-      // Read and parse each file one at a time, yielding between steps
-      const totalSteps = recognized.length;
-      parsedData = {
-        players: new Map(), battingRatings: new Map(), pitchingRatings: new Map(),
-        fieldingRatings: new Map(), playerValues: new Map(),
-        careerBatting: [], careerPitching: [], careerFielding: [],
-        rosterStatus: new Map(), contracts: new Map(), teamRoster: [],
-        teams: new Map(), parks: new Map(), atBatStats: new Map(),
-      };
-
-      const parseFn: Record<string, (text: string) => void> = {
-        dump_players: (t) => { parsedData.players = parseDumpPlayers(t); },
-        dump_players_batting: (t) => { parsedData.battingRatings = parseDumpBattingRatings(t); },
-        dump_players_pitching: (t) => { parsedData.pitchingRatings = parseDumpPitchingRatings(t); },
-        dump_players_fielding: (t) => { parsedData.fieldingRatings = parseDumpFieldingRatings(t); },
-        dump_players_value: (t) => { parsedData.playerValues = parseDumpPlayerValues(t); },
-        dump_career_batting: (t) => { parsedData.careerBatting = parseDumpCareerBatting(t); },
-        dump_career_pitching: (t) => { parsedData.careerPitching = parseDumpCareerPitching(t); },
-        dump_career_fielding: (t) => { parsedData.careerFielding = parseDumpCareerFielding(t); },
-        dump_roster_status: (t) => { parsedData.rosterStatus = parseDumpRosterStatus(t); },
-        dump_contract: (t) => { parsedData.contracts = parseDumpContracts(t); },
-        dump_team_roster: (t) => { parsedData.teamRoster = parseDumpTeamRoster(t); },
-        dump_teams: (t) => { parsedData.teams = parseDumpTeams(t); },
-        dump_parks: (t) => { parsedData.parks = parseDumpParks(t); },
-        dump_at_bat_stats: (t) => { parsedData.atBatStats = parseDumpAtBatStats(t); },
-      };
-
-      for (let i = 0; i < recognized.length; i++) {
-        const r = recognized[i];
-        set({ dumpProgress: { total: totalSteps, loaded: i, currentFile: `Reading ${r.label}...` } });
-        await yieldToUI();
-
-        // Read file
-        const text = await r.file.text();
-
-        // Parse (sync but yields before and after to keep UI alive)
-        set({ dumpProgress: { total: totalSteps, loaded: i, currentFile: `Parsing ${r.label}...` } });
-        await yieldToUI();
-
-        // Skip at-bat stats if the file is very large (>50MB) to prevent freeze
-        if (r.type === 'dump_at_bat_stats' && text.length > 50_000_000) {
-          console.warn(`Skipping ${r.file.name}: file too large (${(text.length / 1048576).toFixed(0)}MB). Statcast data will not be available.`);
-        } else {
-          parseFn[r.type]?.(text);
-        }
-
-        await yieldToUI();
-      }
-
-      set({ dumpProgress: { total: totalSteps, loaded: totalSteps, currentFile: 'Merging data...' } });
-      await yieldToUI();
-
-      // Cache for re-merge
-      (globalThis as any).__cachedDumpData = parsedData;
-
-      // Build team list for UI dropdown
-      const dumpTeams: { id: number; name: string; abbr: string }[] = [];
-      for (const [id, team] of parsedData.teams) {
-        if (team.level === 1) { // MLB level only
-          dumpTeams.push({ id, name: `${team.name} ${team.nickname}`.trim(), abbr: team.abbr });
-        }
-      }
-      dumpTeams.sort((a, b) => a.name.localeCompare(b.name));
-      set({ dumpTeams });
-
-      // Update dumpFiles status
-      const updatedDumpFiles = recognized.map((r) => {
-        let rowCount = 0;
-        if (r.type === 'dump_players') rowCount = parsedData.players.size;
-        else if (r.type === 'dump_players_batting') rowCount = parsedData.battingRatings.size;
-        else if (r.type === 'dump_players_pitching') rowCount = parsedData.pitchingRatings.size;
-        else if (r.type === 'dump_players_fielding') rowCount = parsedData.fieldingRatings.size;
-        else if (r.type === 'dump_players_value') rowCount = parsedData.playerValues.size;
-        else if (r.type === 'dump_career_batting') rowCount = parsedData.careerBatting.length;
-        else if (r.type === 'dump_career_pitching') rowCount = parsedData.careerPitching.length;
-        else if (r.type === 'dump_career_fielding') rowCount = parsedData.careerFielding.length;
-        else if (r.type === 'dump_roster_status') rowCount = parsedData.rosterStatus.size;
-        else if (r.type === 'dump_contract') rowCount = parsedData.contracts.size;
-        else if (r.type === 'dump_team_roster') rowCount = parsedData.teamRoster.length;
-        else if (r.type === 'dump_teams') rowCount = parsedData.teams.size;
-        else if (r.type === 'dump_parks') rowCount = parsedData.parks.size;
-        else if (r.type === 'dump_at_bat_stats') rowCount = parsedData.atBatStats.size;
-        return { type: r.type, fileName: r.file.name, rowCount, loaded: true, tier: r.tier };
-      });
-      set({ dumpFiles: updatedDumpFiles });
-    } else {
-      parsedData = (globalThis as any).__cachedDumpData as ParsedDumpData;
+    for (const file of csvFiles) {
+      const baseName = file.name.split('/').pop()!.split('\\').pop()!;
+      const info = DUMP_FILE_MAP[baseName];
+      if (info) recognized.push({ file, type: info.type, tier: info.tier, label: info.label });
     }
 
-    // Merge into Player[] with UI yields between heavy steps
-    const yieldMerge = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
-    const filterTeamId = get().dumpFilterTeamId;
+    if (recognized.length === 0) return;
 
+    set({
+      dumpProgress: { total: 3, loaded: 0, currentFile: 'Scanning folder...' },
+      dumpFiles: recognized.map((r) => ({
+        type: r.type, fileName: r.file.name, rowCount: 0, loaded: false, tier: r.tier,
+      })),
+      // Reset previous state
+      players: [],
+      dumpFilterTeamId: undefined,
+      dumpTeams: [],
+    });
+
+    // Store file handles for Phase 2
+    (globalThis as any).__dumpFileHandles = recognized;
+
+    // Parse only teams.csv to build the dropdown
+    const teamsFile = recognized.find((r) => r.type === 'dump_teams');
+    if (!teamsFile) {
+      set({ dumpProgress: null });
+      return;
+    }
+
+    set({ dumpProgress: { total: 3, loaded: 1, currentFile: 'Reading teams...' } });
+    const teamsText = await teamsFile.file.text();
+    const teams = parseDumpTeams(teamsText);
+
+    set({ dumpProgress: { total: 3, loaded: 2, currentFile: 'Building team list...' } });
+
+    // Build team list: MLB-level teams (level === 1), with their affiliate count
+    const dumpTeams: { id: number; name: string; abbr: string }[] = [];
+    // Count affiliates per parent
+    const affiliateCounts = new Map<number, number>();
+    for (const [, team] of teams) {
+      if (team.parentTeamId > 0) {
+        affiliateCounts.set(team.parentTeamId, (affiliateCounts.get(team.parentTeamId) || 0) + 1);
+      }
+    }
+    for (const [id, team] of teams) {
+      if (team.level === 1) {
+        const affCount = affiliateCounts.get(id) || 0;
+        const suffix = affCount > 0 ? ` (+${affCount} affiliates)` : '';
+        dumpTeams.push({ id, name: `${team.name} ${team.nickname}`.trim() + suffix, abbr: team.abbr });
+      }
+    }
+    dumpTeams.sort((a, b) => a.name.localeCompare(b.name));
+
+    // Cache teams map for later use in merge
+    (globalThis as any).__dumpTeamsMap = teams;
+
+    set({
+      dumpTeams,
+      dumpProgress: null,
+      importMode: 'dump',
+    });
+  },
+
+  // Phase 2: Full parse + merge for the selected team (and affiliates)
+  loadDumpTeam: async () => {
+    const recognized: { file: File; type: DumpFileType; tier: 1 | 2; label: string }[] =
+      (globalThis as any).__dumpFileHandles || [];
+    const filterTeamId = get().dumpFilterTeamId;
+    if (recognized.length === 0 || filterTeamId === undefined) return;
+
+    const yieldToUI = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    // Sort: at-bat stats last (largest file)
+    const sorted = [...recognized].sort((a, b) => {
+      if (a.type === 'dump_at_bat_stats') return 1;
+      if (b.type === 'dump_at_bat_stats') return -1;
+      return 0;
+    });
+
+    const totalSteps = sorted.length;
+    const parsedData: ParsedDumpData = {
+      players: new Map(), battingRatings: new Map(), pitchingRatings: new Map(),
+      fieldingRatings: new Map(), playerValues: new Map(),
+      careerBatting: [], careerPitching: [], careerFielding: [],
+      rosterStatus: new Map(), contracts: new Map(), teamRoster: [],
+      teams: (globalThis as any).__dumpTeamsMap || new Map(),
+      parks: new Map(), atBatStats: new Map(),
+    };
+
+    const parseFn: Record<string, (text: string) => void> = {
+      dump_players: (t) => { parsedData.players = parseDumpPlayers(t); },
+      dump_players_batting: (t) => { parsedData.battingRatings = parseDumpBattingRatings(t); },
+      dump_players_pitching: (t) => { parsedData.pitchingRatings = parseDumpPitchingRatings(t); },
+      dump_players_fielding: (t) => { parsedData.fieldingRatings = parseDumpFieldingRatings(t); },
+      dump_players_value: (t) => { parsedData.playerValues = parseDumpPlayerValues(t); },
+      dump_career_batting: (t) => { parsedData.careerBatting = parseDumpCareerBatting(t); },
+      dump_career_pitching: (t) => { parsedData.careerPitching = parseDumpCareerPitching(t); },
+      dump_career_fielding: (t) => { parsedData.careerFielding = parseDumpCareerFielding(t); },
+      dump_roster_status: (t) => { parsedData.rosterStatus = parseDumpRosterStatus(t); },
+      dump_contract: (t) => { parsedData.contracts = parseDumpContracts(t); },
+      dump_team_roster: (t) => { parsedData.teamRoster = parseDumpTeamRoster(t); },
+      dump_teams: (t) => { parsedData.teams = parseDumpTeams(t); },
+      dump_parks: (t) => { parsedData.parks = parseDumpParks(t); },
+      dump_at_bat_stats: (t) => { parsedData.atBatStats = parseDumpAtBatStats(t); },
+    };
+
+    for (let i = 0; i < sorted.length; i++) {
+      const r = sorted[i];
+      set({ dumpProgress: { total: totalSteps, loaded: i, currentFile: `Reading ${r.label}...` } });
+      await yieldToUI();
+
+      // Skip teams.csv if already cached
+      if (r.type === 'dump_teams' && parsedData.teams.size > 0) {
+        continue;
+      }
+
+      const text = await r.file.text();
+
+      set({ dumpProgress: { total: totalSteps, loaded: i, currentFile: `Parsing ${r.label}...` } });
+      await yieldToUI();
+
+      // Skip at-bat stats if too large (>30MB)
+      if (r.type === 'dump_at_bat_stats' && text.length > 30_000_000) {
+        console.warn(`Skipping ${r.file.name}: too large (${(text.length / 1048576).toFixed(0)}MB). Statcast data unavailable.`);
+      } else {
+        parseFn[r.type]?.(text);
+      }
+
+      await yieldToUI();
+    }
+
+    // Cache parsed data for re-merge on team change
+    (globalThis as any).__cachedDumpData = parsedData;
+
+    // Update dumpFiles status with row counts
+    const updatedDumpFiles = sorted.map((r) => {
+      let rowCount = 0;
+      if (r.type === 'dump_players') rowCount = parsedData.players.size;
+      else if (r.type === 'dump_players_batting') rowCount = parsedData.battingRatings.size;
+      else if (r.type === 'dump_players_pitching') rowCount = parsedData.pitchingRatings.size;
+      else if (r.type === 'dump_players_fielding') rowCount = parsedData.fieldingRatings.size;
+      else if (r.type === 'dump_players_value') rowCount = parsedData.playerValues.size;
+      else if (r.type === 'dump_career_batting') rowCount = parsedData.careerBatting.length;
+      else if (r.type === 'dump_career_pitching') rowCount = parsedData.careerPitching.length;
+      else if (r.type === 'dump_career_fielding') rowCount = parsedData.careerFielding.length;
+      else if (r.type === 'dump_roster_status') rowCount = parsedData.rosterStatus.size;
+      else if (r.type === 'dump_contract') rowCount = parsedData.contracts.size;
+      else if (r.type === 'dump_team_roster') rowCount = parsedData.teamRoster.length;
+      else if (r.type === 'dump_teams') rowCount = parsedData.teams.size;
+      else if (r.type === 'dump_parks') rowCount = parsedData.parks.size;
+      else if (r.type === 'dump_at_bat_stats') rowCount = parsedData.atBatStats.size;
+      return { type: r.type, fileName: r.file.name, rowCount, loaded: true, tier: r.tier };
+    });
+    set({ dumpFiles: updatedDumpFiles });
+
+    // Merge + Score + Percentiles with UI yields
     set({ dumpProgress: { total: 1, loaded: 0, currentFile: 'Merging player data...' } });
-    await yieldMerge();
+    await yieldToUI();
     const merged = mergeDumpData(parsedData, filterTeamId);
 
     set({ dumpProgress: { total: 1, loaded: 0, currentFile: `Scoring ${merged.length} players...` } });
-    await yieldMerge();
+    await yieldToUI();
     const scored = scoreAllPlayers(merged, get().settings);
 
     set({ dumpProgress: { total: 1, loaded: 0, currentFile: 'Computing percentiles...' } });
-    await yieldMerge();
+    await yieldToUI();
     const withPercentiles = calcPercentiles(scored);
 
     set({
       players: withPercentiles,
       dumpProgress: null,
-      importMode: 'dump',
     });
 
     get().generateAllLineups();
