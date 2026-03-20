@@ -12,6 +12,7 @@ import Trends from './pages/Trends';
 import Strategy from './pages/Strategy';
 import Organization from './pages/Organization';
 import Prospects from './pages/Prospects';
+import Analysis from './pages/Analysis';
 import ImportData from './pages/ImportData';
 import Settings from './pages/Settings';
 import PTDashboard from './pages/pt/PTDashboard';
@@ -33,6 +34,7 @@ const FRANCHISE_PAGES: Record<string, React.FC> = {
   strategy: Strategy,
   organization: Organization,
   prospects: Prospects,
+  analysis: Analysis,
   import: ImportData,
   settings: Settings,
 };

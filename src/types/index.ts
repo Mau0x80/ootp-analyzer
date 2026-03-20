@@ -428,6 +428,7 @@ export type AppTab =
   | 'strategy'
   | 'organization'
   | 'prospects'
+  | 'analysis'
   | 'import'
   | 'settings';
 

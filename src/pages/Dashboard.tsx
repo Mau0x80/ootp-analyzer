@@ -3,7 +3,7 @@ import { useStore } from '../store/useStore';
 import StatCard from '../components/common/StatCard';
 import ScoreBadge from '../components/common/ScoreBadge';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { Users, Swords, Activity, Trophy } from 'lucide-react';
+import { Users, Swords, Activity, Trophy, DollarSign, AlertTriangle } from 'lucide-react';
 import { HITTER_ARCHETYPE_INFO, PITCHER_ARCHETYPE_INFO } from '../types';
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
@@ -74,6 +74,19 @@ export default function Dashboard() {
       if (p.pitcherArchetype) pitcherArchetypes[p.pitcherArchetype] = (pitcherArchetypes[p.pitcherArchetype] || 0) + 1;
     });
 
+    // Payroll summary (from dump contract data)
+    let totalPayroll = 0;
+    let onDLCount = 0;
+    let freeAgentSoon = 0; // players in last contract year
+    for (const p of players) {
+      const c = p.dumpData?.contractInfo;
+      if (c && c.salaries.length > 0 && c.currentYear <= c.salaries.length) {
+        totalPayroll += c.salaries[c.currentYear - 1] || 0;
+      }
+      if (p.dumpData?.rosterInfo?.isOnDL || p.dumpData?.rosterInfo?.isOnDL60) onDLCount++;
+      if (c && c.currentYear >= c.totalYears && c.totalYears > 0) freeAgentSoon++;
+    }
+
     return {
       total: players.length,
       batterCount: batters.length,
@@ -87,6 +100,9 @@ export default function Dashboard() {
       positionData,
       hitterArchetypes,
       pitcherArchetypes,
+      totalPayroll,
+      onDLCount,
+      freeAgentSoon,
     };
   }, [players]);
 
@@ -123,6 +139,37 @@ export default function Dashboard() {
           color="text-yellow-400"
         />
       </div>
+
+      {/* Payroll & Roster Status (only when dump data available) */}
+      {stats.totalPayroll > 0 && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatCard
+            label="Payroll"
+            value={`$${(stats.totalPayroll / 1000000).toFixed(1)}M`}
+            icon={<DollarSign className="w-4 h-4" />}
+            color="text-green-400"
+          />
+          <StatCard
+            label="On IL"
+            value={stats.onDLCount}
+            icon={<AlertTriangle className="w-4 h-4" />}
+            color={stats.onDLCount > 3 ? 'text-red-400' : 'text-yellow-400'}
+          />
+          <StatCard
+            label="Pending FA"
+            value={stats.freeAgentSoon}
+            subtitle="last contract year"
+            icon={<Users className="w-4 h-4" />}
+            color="text-amber-400"
+          />
+          <StatCard
+            label="Avg OVR"
+            value={Math.round(players.reduce((s, p) => s + p.cardOvr, 0) / players.length)}
+            icon={<Trophy className="w-4 h-4" />}
+            color="text-blue-400"
+          />
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* WAR Leaders Chart */}
