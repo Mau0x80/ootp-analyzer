@@ -1,15 +1,27 @@
-import { useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { useStore } from '../store/useStore';
 import PlayerTable from '../components/common/PlayerTable';
 import ScoreBadge from '../components/common/ScoreBadge';
 import type { Player } from '../types';
 import { HITTER_ARCHETYPE_INFO, RATINGS_SCALES } from '../types';
 import { ratingColor } from '../utils/helpers';
+import {
+  groupPlayersByLevel,
+  getLevelBadgeClasses,
+  getPlayingLevel,
+} from '../utils/helpers';
+
+const POSITIONS = ['All', 'C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF', 'DH'];
 
 export default function Batters() {
   const players = useStore((s) => s.players);
   const scale = useStore((s) => RATINGS_SCALES[s.settings.currentRatingsScale]);
+  const setSelectedPlayer = useStore((s) => s.setSelectedPlayer);
+  const [search, setSearch] = useState('');
+  const [activePos, setActivePos] = useState('All');
+
   const batters = useMemo(() => players.filter((p) => !p.isPitcher || p.isTwoWay), [players]);
+  const hasDumpData = useMemo(() => batters.some((p) => p.dumpData !== null), [batters]);
 
   const columns = useMemo(
     () => [
@@ -171,6 +183,73 @@ export default function Batters() {
     );
   }
 
+  // --- Grouped view (dump data loaded) ---
+  if (hasDumpData) {
+    const q = search.toLowerCase();
+    const filtered = batters.filter((p) => {
+      const matchSearch = !q || p.name.toLowerCase().includes(q) || p.pos.toLowerCase().includes(q);
+      const matchPos = activePos === 'All' || p.pos === activePos;
+      return matchSearch && matchPos;
+    });
+    const groups = groupPlayersByLevel(filtered);
+
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <h1 className="text-2xl font-bold">Batters</h1>
+          <div className="flex items-center gap-2 flex-wrap">
+            <input
+              type="text"
+              placeholder="Search player..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="px-3 py-1.5 text-sm bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 w-44"
+            />
+            <div className="flex gap-1 flex-wrap">
+              {POSITIONS.map((pos) => (
+                <button
+                  key={pos}
+                  onClick={() => setActivePos(pos)}
+                  className={`px-2 py-1 text-xs rounded font-medium transition-colors ${
+                    activePos === pos
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                  }`}
+                >
+                  {pos}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {groups.length === 0 && (
+          <p className="text-center py-10 text-gray-500">No players match the current filters.</p>
+        )}
+
+        {groups.map((group) => (
+          <div key={group.label} className="space-y-2">
+            <div className="flex items-center gap-2">
+              <span className={`px-2 py-0.5 text-xs font-bold rounded ${getLevelBadgeClasses(group.level)}`}>
+                {group.label}
+              </span>
+              <span className="text-sm text-gray-400">{group.teamName}</span>
+              <span className="text-xs text-gray-600">({group.players.length} players)</span>
+            </div>
+            <PlayerTable
+              players={group.players}
+              columns={columns}
+              onPlayerClick={(p) => setSelectedPlayer(p.id)}
+              showSearch={false}
+              showPositionFilter={false}
+            />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  // --- Flat view (CSV only) ---
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-bold">Batters</h1>

@@ -11,47 +11,22 @@ import {
   Users,
 } from 'lucide-react';
 import type { Player } from '../types';
+import {
+  getPlayingLevel,
+  getLevelLabel,
+  getLevelSortOrder,
+  getLevelBadgeClasses,
+} from '../utils/helpers';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function getLevelLabel(level: number): string {
-  if (level === 1) return 'MLB';
-  if (level <= 3) return 'AAA';
-  if (level <= 5) return 'AA';
-  if (level <= 7) return 'A+';
-  if (level <= 9) return 'A';
-  return 'Rookie/Foreign';
-}
-
-function getLevelSortOrder(level: number): number {
-  if (level === 1) return 0;
-  if (level <= 3) return 1;
-  if (level <= 5) return 2;
-  if (level <= 7) return 3;
-  if (level <= 9) return 4;
-  return 5;
-}
-
-function getLevelBadgeClasses(level: number): string {
-  if (level === 1) return 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30';
-  if (level <= 3) return 'bg-blue-500/20 text-blue-400 border border-blue-500/30';
-  if (level <= 5) return 'bg-purple-500/20 text-purple-400 border border-purple-500/30';
-  if (level <= 7) return 'bg-amber-500/20 text-amber-400 border border-amber-500/30';
-  if (level <= 9) return 'bg-orange-500/20 text-orange-400 border border-orange-500/30';
-  return 'bg-gray-500/20 text-gray-400 border border-gray-500/30';
-}
 
 function ratingColor(value: number): string {
   if (value >= 80) return 'text-emerald-400';
   if (value >= 60) return 'text-blue-400';
   if (value >= 40) return 'text-yellow-400';
   return 'text-gray-400';
-}
-
-function getPlayingLevel(player: Player): number {
-  return player.dumpData?.rosterInfo?.playingLevel ?? 99;
 }
 
 // ---------------------------------------------------------------------------

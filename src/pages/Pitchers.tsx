@@ -1,15 +1,22 @@
-import { useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { useStore } from '../store/useStore';
 import PlayerTable from '../components/common/PlayerTable';
 import ScoreBadge from '../components/common/ScoreBadge';
 import type { Player } from '../types';
 import { PITCHER_ARCHETYPE_INFO, RATINGS_SCALES } from '../types';
-import { ratingColor } from '../utils/helpers';
+import { ratingColor, groupPlayersByLevel, getLevelBadgeClasses } from '../utils/helpers';
+
+const ROLES = ['All', 'SP', 'RP', 'CL'];
 
 export default function Pitchers() {
   const players = useStore((s) => s.players);
   const scale = useStore((s) => RATINGS_SCALES[s.settings.currentRatingsScale]);
+  const setSelectedPlayer = useStore((s) => s.setSelectedPlayer);
+  const [search, setSearch] = useState('');
+  const [activeRole, setActiveRole] = useState('All');
+
   const pitchers = useMemo(() => players.filter((p) => p.isPitcher), [players]);
+  const hasDumpData = useMemo(() => pitchers.some((p) => p.dumpData !== null), [pitchers]);
 
   const columns = useMemo(
     () => [
@@ -180,6 +187,73 @@ export default function Pitchers() {
     );
   }
 
+  // --- Grouped view (dump data loaded) ---
+  if (hasDumpData) {
+    const q = search.toLowerCase();
+    const filtered = pitchers.filter((p) => {
+      const matchSearch = !q || p.name.toLowerCase().includes(q);
+      const matchRole = activeRole === 'All' || p.pos === activeRole;
+      return matchSearch && matchRole;
+    });
+    const groups = groupPlayersByLevel(filtered);
+
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <h1 className="text-2xl font-bold">Pitchers</h1>
+          <div className="flex items-center gap-2 flex-wrap">
+            <input
+              type="text"
+              placeholder="Search pitcher..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="px-3 py-1.5 text-sm bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 w-44"
+            />
+            <div className="flex gap-1">
+              {ROLES.map((role) => (
+                <button
+                  key={role}
+                  onClick={() => setActiveRole(role)}
+                  className={`px-2 py-1 text-xs rounded font-medium transition-colors ${
+                    activeRole === role
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                  }`}
+                >
+                  {role}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {groups.length === 0 && (
+          <p className="text-center py-10 text-gray-500">No pitchers match the current filters.</p>
+        )}
+
+        {groups.map((group) => (
+          <div key={group.label} className="space-y-2">
+            <div className="flex items-center gap-2">
+              <span className={`px-2 py-0.5 text-xs font-bold rounded ${getLevelBadgeClasses(group.level)}`}>
+                {group.label}
+              </span>
+              <span className="text-sm text-gray-400">{group.teamName}</span>
+              <span className="text-xs text-gray-600">({group.players.length} pitchers)</span>
+            </div>
+            <PlayerTable
+              players={group.players}
+              columns={columns}
+              onPlayerClick={(p) => setSelectedPlayer(p.id)}
+              showSearch={false}
+              showPositionFilter={false}
+            />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  // --- Flat view (CSV only) ---
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-bold">Pitchers</h1>

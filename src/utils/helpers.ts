@@ -1,5 +1,69 @@
 import type { Player } from '../types';
 
+// ---------------------------------------------------------------------------
+// Affiliate / Playing Level helpers
+// ---------------------------------------------------------------------------
+
+export function getPlayingLevel(player: Player): number {
+  return player.dumpData?.rosterInfo?.playingLevel ?? 99;
+}
+
+export function getLevelLabel(level: number): string {
+  if (level === 1) return 'MLB';
+  if (level <= 3) return 'AAA';
+  if (level <= 5) return 'AA';
+  if (level <= 7) return 'A+';
+  if (level <= 9) return 'A';
+  return 'Rookie';
+}
+
+export function getLevelSortOrder(level: number): number {
+  if (level === 1) return 0;
+  if (level <= 3) return 1;
+  if (level <= 5) return 2;
+  if (level <= 7) return 3;
+  if (level <= 9) return 4;
+  return 5;
+}
+
+export function getLevelBadgeClasses(level: number): string {
+  if (level === 1) return 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30';
+  if (level <= 3) return 'bg-blue-500/20 text-blue-400 border border-blue-500/30';
+  if (level <= 5) return 'bg-purple-500/20 text-purple-400 border border-purple-500/30';
+  if (level <= 7) return 'bg-amber-500/20 text-amber-400 border border-amber-500/30';
+  if (level <= 9) return 'bg-orange-500/20 text-orange-400 border border-orange-500/30';
+  return 'bg-gray-500/20 text-gray-400 border border-gray-500/30';
+}
+
+export interface LevelGroup {
+  label: string;
+  level: number;
+  sortOrder: number;
+  teamName: string;
+  players: Player[];
+}
+
+export function groupPlayersByLevel(players: Player[]): LevelGroup[] {
+  const map = new Map<string, LevelGroup>();
+  for (const p of players) {
+    const level = getPlayingLevel(p);
+    const label = getLevelLabel(level);
+    const key = label;
+    if (!map.has(key)) {
+      map.set(key, {
+        label,
+        level,
+        sortOrder: getLevelSortOrder(level),
+        teamName: p.dumpData ? p.dumpData.teamName : '',
+        players: [],
+      });
+    }
+    map.get(key)!.players.push(p);
+  }
+  return [...map.values()].sort((a, b) => a.sortOrder - b.sortOrder);
+}
+
+// ---------------------------------------------------------------------------
 // Detect player strengths and weaknesses based on ratings
 export interface PlayerInsight {
   label: string;
