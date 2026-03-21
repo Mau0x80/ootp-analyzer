@@ -224,14 +224,17 @@ export const useStore = create<AppState>((set, get) => ({
     const state = get();
     if (state.players.length === 0) return;
     const { settings, players } = state;
+    // When dump data is loaded, restrict lineups/rotation to MLB roster only
+    const hasDump = players.some((p) => p.dumpData !== null);
+    const rosterPlayers = hasDump ? players.filter((p) => p.dumpData?.teamLevel === 1) : players;
     const modes = ['general', 'vs_rhp', 'vs_lhp', 'defense', 'balanced'] as const;
     const lineups: Record<string, Lineup> = {};
     for (const mode of modes) {
       lineups[mode] = generateLineup(
-        players, mode, settings, settings.useDH, settings.allowOutOfPosition
+        rosterPlayers, mode, settings, settings.useDH, settings.allowOutOfPosition
       );
     }
-    const pitchingStaff = generatePitchingStaff(players);
+    const pitchingStaff = generatePitchingStaff(rosterPlayers);
     set({ lineups, pitchingStaff });
   },
 
