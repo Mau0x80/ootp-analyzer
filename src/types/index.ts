@@ -669,6 +669,7 @@ export interface DumpExtraData {
   teamId: number;
   teamName: string;
   teamAbbr: string;
+  teamLevel: number;
   personality: PlayerPersonality;
   morale: number;
   playerStrategy: PlayerStrategySettings;

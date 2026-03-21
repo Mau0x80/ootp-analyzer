@@ -5,7 +5,7 @@ import type { Player } from '../types';
 // ---------------------------------------------------------------------------
 
 export function getPlayingLevel(player: Player): number {
-  return player.dumpData?.rosterInfo?.playingLevel ?? 99;
+  return player.dumpData?.teamLevel ?? 99;
 }
 
 export function getLevelLabel(level: number): string {

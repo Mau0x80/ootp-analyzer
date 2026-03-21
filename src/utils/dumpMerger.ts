@@ -278,6 +278,7 @@ function buildPlayer(pid: number, bio: DumpPlayerBio, teamId: number, ctx: Merge
     teamId,
     teamName,
     teamAbbr,
+    teamLevel: team?.level ?? 99,
     personality: bio.personality,
     morale: bio.morale,
     playerStrategy: bio.playerStrategy,
