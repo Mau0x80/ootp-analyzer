@@ -468,6 +468,7 @@ export type PTAppTab =
   | 'pt_collection'
   | 'pt_tournament'
   | 'pt_sleepers'
+  | 'pt_lineup'
   | 'pt_import'
   | 'pt_settings';
 

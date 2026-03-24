@@ -1,7 +1,7 @@
 import { useStore } from '../../store/useStore';
 import type { PTAppTab } from '../../types';
 import {
-  LayoutDashboard, Library, Trophy, Search, Upload, Settings, Zap,
+  LayoutDashboard, Library, Trophy, Search, Upload, Settings, Zap, Users,
 } from 'lucide-react';
 
 const PT_NAV_ITEMS: { tab: PTAppTab; label: string; icon: React.FC<any> }[] = [
@@ -9,6 +9,7 @@ const PT_NAV_ITEMS: { tab: PTAppTab; label: string; icon: React.FC<any> }[] = [
   { tab: 'pt_collection', label: 'Collection', icon: Library },
   { tab: 'pt_tournament', label: 'Tournament', icon: Trophy },
   { tab: 'pt_sleepers', label: 'Sleepers', icon: Search },
+  { tab: 'pt_lineup', label: 'Best Lineup', icon: Users },
   { tab: 'pt_import', label: 'Import Cards', icon: Upload },
   { tab: 'pt_settings', label: 'PT Settings', icon: Settings },
 ];

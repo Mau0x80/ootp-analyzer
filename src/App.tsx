@@ -19,6 +19,7 @@ import PTDashboard from './pages/pt/PTDashboard';
 import PTCollection from './pages/pt/PTCollection';
 import PTTournament from './pages/pt/PTTournament';
 import PTSleepers from './pages/pt/PTSleepers';
+import PTLineup from './pages/pt/PTLineup';
 import PTImport from './pages/pt/PTImport';
 import PTSettings from './pages/pt/PTSettings';
 import PlayerModal from './components/players/PlayerModal';
@@ -44,6 +45,7 @@ const PT_PAGES: Record<string, React.FC> = {
   pt_collection: PTCollection,
   pt_tournament: PTTournament,
   pt_sleepers: PTSleepers,
+  pt_lineup: PTLineup,
   pt_import: PTImport,
   pt_settings: PTSettings,
 };
